@@ -1,0 +1,125 @@
+[run]
+seed = 20261028
+
+[universe]
+index = ["^SPX"]
+etfs = ["SPY", "QQQ", "XLK", "XLE", "XLF"]
+xlk_holdings = ["NVDA", "AAPL", "MSFT", "AVGO", "ORCL", "AMD", "CSCO", "CRM", "IBM", "PLTR"]
+singles = ["AMZN", "META", "GOOGL", "TSLA", "NFLX", "JPM", "BAC", "XOM", "CVX", "UNH", "WMT", "HD", "DIS", "UBER", "SHOP", "ABNB"]
+max_days_to_expiry = 400
+sector_spdrs = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY"]
+
+[snapshot]
+window_start_ny = "15:25"
+window_end_ny = "16:30"
+close_ny = "16:00"
+cron_utc = ["30 19 * * 1-5", "30 20 * * 1-5"]
+local_task_times_london = ["19:30", "20:30"]
+request_interval_s = 0.5
+retries = 3
+backoff_s = [5, 15, 45]
+release_tag = "snapshots"
+test_release_tag = "snapshots-test"
+min_tickers_ok = 28
+
+[clean]
+min_mid = 0.05
+max_rel_spread = 0.5
+stale_sessions = 5
+
+[pricing]
+n_validate = 2000
+n_prod = 200
+
+[iv]
+iv_lo = 0.005
+iv_hi = 5.0
+iv_tol = 1e-10
+newton_max_iter = 50
+min_vega = 1e-6
+
+[forwards]
+parity_n_strikes = 10
+parity_r2_min = 0.9999
+
+[svi]
+min_quotes = 8
+s_min = 1e-4
+penalty = 1e4
+starts = [[0.01, 0.1, -0.5, 0.0, 0.1], [0.01, 0.3, -0.8, 0.05, 0.2], [0.0, 0.05, 0.0, 0.0, 0.05], [0.02, 0.2, -0.3, -0.05, 0.3], [0.005, 0.5, -0.95, 0.1, 0.5]]
+grid_points = 401
+grid_pad = 0.5
+
+[surface]
+tenors_days = [30, 90]
+delta = 0.25
+
+[density]
+bl_dk = 0.001
+int_tol = 1e-3
+moves = [0.025, 0.05, 0.10, 0.20]
+k_sd = 8
+
+[events]
+min_n = 20
+min_group_n = 8
+boot_reps = 10000
+ci = 0.90
+
+[correlation]
+cor3m_horizon = 63
+nw_maxlags = 63
+live_horizon = 21
+rv_min_days = 20
+
+[vrp]
+start = "1990-01-02"
+horizon = 21
+garch_min_obs = 1000
+switch_cost_bp = 10
+straddle_target_days = 30
+
+[sim]
+paths = 20000
+steps_per_day = 13
+days = 21
+hedge_every_steps = [1, 13, 65]
+hedge_cost_bp = 1.0
+gbm = { s0 = 100.0, mu = 0.0, sigma = 0.2, r = 0.04 }
+heston = { s0 = 100.0, v0 = 0.04, kappa = 2.0, theta = 0.04, xi = 0.5, rho = -0.7, r = 0.04 }
+
+[book]
+positions = [
+  { underlying = "^SPX", side = -1, kind = "P", target_delta = -0.25, target_days = 30, contracts = 10 },
+  { underlying = "^SPX", side = -1, kind = "C", target_delta = 0.25, target_days = 30, contracts = 10 },
+  { underlying = "AAPL", side = 1, kind = "C", target_delta = 0.50, target_days = 60, contracts = 20 },
+  { underlying = "NVDA", side = -1, kind = "P", target_delta = -0.30, target_days = 45, contracts = 15 },
+]
+
+[limits]
+dollar_delta = 2000000
+dollar_gamma_1pct = 250000
+vega_per_point = 50000
+
+[risk]
+spot_shocks = [-0.10, -0.075, -0.05, -0.025, 0.0, 0.025, 0.05, 0.075, 0.10]
+vol_shocks_pts = [-5.0, -2.5, 0.0, 2.5, 5.0]
+
+[tolerances]
+bsm_vs_quantlib = 1e-10
+crr_amer_vs_quantlib_rel_spot = 1e-4
+crr_euro_vs_analytic_rel_spot = 5e-5
+greeks_fd_rel = 1e-5
+fd_h_spot_rel = 1e-4
+fd_h_vol = 1e-4
+fd_h_t = 1e-5
+fd_h_rate = 1e-5
+iv_roundtrip = 1e-8
+parity_european = 1e-10
+
+[tolerances.greeks_fd_abs]
+delta = 1e-6
+gamma = 4e-6
+vega = 6e-5
+vanna = 1.2e-5
+volga = 5e-4

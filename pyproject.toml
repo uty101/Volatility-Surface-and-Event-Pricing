@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "volsurf"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "statsmodels",
+    "arch",
+    "QuantLib",
+    "yfinance",
+    "exchange_calendars",
+    "requests",
+    "pyarrow",
+    "openpyxl",
+    "matplotlib",
+    "reportlab",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-socket",
+    "ruff",
+    "pypdf",
+    "pymupdf",
+]
+
+[tool.setuptools]
+packages = ["volsurf"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
