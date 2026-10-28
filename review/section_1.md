@@ -984,3 +984,284 @@ exit=0
 4. `volsurf/data.py`
 5. `scripts/pull_data.py`
 6. `decisions/OPEN.md` O-25 and O-26
+
+## Session 1b
+
+Instruction `instructions/01b_section_1_capture_fixes.md`. Commits: `980bf69` step 1b.1, `9a24030` step 1b.2, `c43e2e6` step 1b.3, `5c013e5` decisions record (`decisions/section_1_review.md`, `## Session 1b`).
+
+### 1b-D1. Step 1b.1, XLK top holdings
+
+**1. The new `[universe]` table** (`config.toml` at `980bf69`). `[snapshot] min_tickers_ok` is now 33.
+
+```toml
+[universe]
+index = ["^SPX"]
+etfs = ["SPY", "QQQ", "XLK", "XLE", "XLF"]
+xlk_holdings = ["NVDA", "AAPL", "MSFT", "AMD", "AVGO", "MU", "INTC", "PLTR", "CSCO", "PANW", "AMAT", "LRCX", "ORCL", "CRM", "IBM"]
+singles = ["AMZN", "META", "GOOGL", "TSLA", "NFLX", "JPM", "BAC", "XOM", "CVX", "UNH", "WMT", "HD", "DIS", "UBER", "SHOP", "ABNB"]
+max_days_to_expiry = 400
+sector_spdrs = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY"]
+```
+
+**2. Coverage from the committed holdings CSV** (`data/raw/ssga/xlk_holdings_2026-10-28.csv`). Rank is the name's rank by weight among all XLK holdings. The 15 names cover **0.720304** of XLK; `test_xlk_names_cover_70_percent` asserts at least 0.70.
+
+**3. The first and last 3 rows of `close.parquet` for the 5 new columns**, with each column's first non-missing date (PANW listed on 2012-07-20).
+
+```
+ rank ticker   weight
+  1.0   NVDA 0.152191
+  2.0   AAPL 0.146174
+  3.0   MSFT 0.113849
+  4.0    AMD 0.047776
+  5.0   AVGO 0.046997
+  6.0     MU 0.040155
+  7.0   INTC 0.027214
+  8.0   PLTR 0.026714
+  9.0   CSCO 0.025649
+ 10.0   PANW 0.019128
+ 11.0   AMAT 0.018367
+ 12.0   LRCX 0.017609
+ 15.0    IBM 0.013775
+ 16.0   ORCL 0.013181
+ 20.0    CRM 0.011527
+coverage of 15 names: 0.720304
+first non-missing dates:
+MU      1989-12-01
+INTC    1989-12-01
+PANW    2012-07-20
+AMAT    1989-12-01
+LRCX    1989-12-01
+                MU      INTC  PANW      AMAT      LRCX
+date                                                  
+1989-12-01  0.9625  1.101563   NaN  0.425781  0.116667
+1989-12-04  1.0000  1.117188   NaN  0.429688  0.119444
+1989-12-05  1.0125  1.109375   NaN  0.421875  0.113889
+                    MU       INTC        PANW        AMAT        LRCX
+date                                                                 
+2026-10-23  877.549988  86.959999  380.549988  377.239990  230.100006
+2026-10-26  903.700012  90.470001  390.459991  387.589996  237.500000
+2026-10-27  928.760010  93.739998  401.700012  395.929993  240.850006
+close.parquet shape (9293, 36)
+```
+
+**4. How the prices stage was rerun (O-27).** At 14:56 UTC yfinance already returned a live 2026-10-28 row (MU 967.06 at 10:56 New York), and `pull_data.py` ends the history at the New York pull date + 1, so the plain `--stage prices` command would have stored an intraday price as the 2026-10-28 close. The stage function was called with the pull date pinned to 2026-10-27:
+
+```python
+pull_data.stage_prices(yf.Ticker, date(2026, 10, 27), load_config())
+```
+
+```
+prices prices/close.parquet                 rows=9293 1989-12-01 .. 2026-10-27
+prices prices/index.parquet                 rows=9293 1989-12-01 .. 2026-10-27
+prices prices/sectors.parquet               rows=7004 1998-12-22 .. 2026-10-27
+prices prices/dividends.csv                 rows=2479 1989-12-05 .. 2026-10-14
+```
+
+Checks against the session 1 files: the 31 old `close.parquet` columns are identical (`DataFrame.equals`), the 2,181 old dividend rows are identical (outer merge on date and ticker, max difference 0), and `index.parquet` came back byte-identical. `sectors.parquet`'s adjusted closes moved by at most 7.6e-5 (XLV), Yahoo recomputing its adjustment factors, so the session 1 file was kept with its manifest entries, under "Nothing else in `data/raw/` changes". Only `close.parquet`, `dividends.csv`, their 2 manifest entries and the prices stage's `pulled_utc` changed:
+
+```diff
+diff --git a/data/raw/MANIFEST.json b/data/raw/MANIFEST.json
+index a514ee3..48dd025 100644
+--- a/data/raw/MANIFEST.json
++++ b/data/raw/MANIFEST.json
+@@ -27,7 +27,7 @@
+       }
+     },
+     "prices": {
+-      "pulled_utc": "2026-10-28T12:44:47.167681+00:00",
++      "pulled_utc": "2026-10-28T14:56:50.962009+00:00",
+       "versions": {
+         "python": "3.12.13",
+         "yfinance": "1.7.0",
+@@ -164,21 +164,21 @@
+     },
+     "prices/close.parquet": {
+       "stage": "prices",
+-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-29, auto_adjust=False, actions=True)",
+-      "pulled_utc": "2026-10-28T12:44:47.167681+00:00",
++      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-28, auto_adjust=False, actions=True)",
++      "pulled_utc": "2026-10-28T14:56:50.962009+00:00",
+       "rows": 9293,
+       "first_date": "1989-12-01",
+       "last_date": "2026-10-27",
+-      "sha256": "1a86d3b1f6aca7d9416b6b72c449763943c49b9848df7f7e96ffcc9438df23e6"
++      "sha256": "7d1a6c0d0b32018017d1a94fe26cdc1bbad198b0d29843e863f9675e20aee665"
+     },
+     "prices/dividends.csv": {
+       "stage": "prices",
+-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-29, auto_adjust=False, actions=True)",
+-      "pulled_utc": "2026-10-28T12:44:47.167681+00:00",
+-      "rows": 2181,
++      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-28, auto_adjust=False, actions=True)",
++      "pulled_utc": "2026-10-28T14:56:50.962009+00:00",
++      "rows": 2479,
+       "first_date": "1989-12-05",
+-      "last_date": "2026-10-09",
+-      "sha256": "e6be77d5f5a59e2fae5afe95f0f851de1b215630ea82566370a54cc0f3fd2ea1"
++      "last_date": "2026-10-14",
++      "sha256": "4f0eee3ba5a81ff07a6c8ed872510d1a5bcf906e9ef1422efd64cfc264628262"
+     },
+     "prices/index.parquet": {
+       "stage": "prices",
+```
+
+**5. Tests that count tickers.** `test_pull_uses_fake_session` now expects 36 close columns and 36 dividend rows (31 before). `test_close_has_every_captured_ticker_but_spx` and `test_xlk_names_in_holdings` read the config, so they now cover all 15 names without a change.
+
+### 1b-D2. Step 1b.2, the diff of `register_snapshot_task.ps1`
+
+```diff
+diff --git a/scripts/windows/register_snapshot_task.ps1 b/scripts/windows/register_snapshot_task.ps1
+index 6e16406..e207e86 100644
+--- a/scripts/windows/register_snapshot_task.ps1
++++ b/scripts/windows/register_snapshot_task.ps1
+@@ -1,5 +1,5 @@
+-# Registers the backup capture task volsurf-snapshot (kickoff Section 9, step 0.2).
+-# Monday to Friday at each [snapshot] local_task_times_london time, runs the repo venv's Python on
++# Registers the backup capture task volsurf-snapshot (kickoff Section 9, step 0.2; instruction 01b, step 1b.2).
++# Monday to Friday at each [snapshot] local_task_times_utc time, runs the repo venv's Python on
+ # scripts/snapshot.py --runner local --out data/local_capture --upload better.
+ # Runs only while the user is logged on; starts when available after a missed time.
+ $ErrorActionPreference = "Stop"
+@@ -9,21 +9,26 @@ $python = Join-Path $repo ".venv\Scripts\python.exe"
+ if (-not (Test-Path $python)) {
+     throw "No venv Python at $python. Build it: uv venv --python 3.12; uv pip install -r requirements-lock.txt; uv pip install -e . --no-deps"
+ }
+-# The trigger times are London wall-clock times, and Task Scheduler uses the machine's time zone.
+-if ((Get-TimeZone).Id -ne "GMT Standard Time") {
+-    throw "Machine time zone is $((Get-TimeZone).Id), not GMT Standard Time (London); the task times would be wrong."
+-}
+ 
+ Push-Location $repo
+ try {
+-    $times = & $python -c "import tomllib; print('\n'.join(tomllib.load(open('config.toml', 'rb'))['snapshot']['local_task_times_london']))"
++    $times = & $python -c "import tomllib; print('\n'.join(tomllib.load(open('config.toml', 'rb'))['snapshot']['local_task_times_utc']))"
+ } finally {
+     Pop-Location
+ }
+-if (-not $times) { throw "Could not read [snapshot] local_task_times_london from config.toml" }
++if (-not $times) { throw "Could not read [snapshot] local_task_times_utc from config.toml" }
+ 
++# The trigger times are UTC instants. Each is built as a UTC DateTime and converted to local time, so
++# New-ScheduledTaskTrigger stores a StartBoundary in UTC and the task fires at the same UTC instant in
++# every time zone and season.
++$today = [DateTime]::UtcNow.ToString("yyyy-MM-dd")
+ $days = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
+-$triggers = @($times | ForEach-Object { New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $_ })
++$triggers = @($times | ForEach-Object {
++    $utc = [DateTime]::SpecifyKind(
++        [DateTime]::ParseExact("$today $_", "yyyy-MM-dd HH:mm", [Globalization.CultureInfo]::InvariantCulture),
++        [DateTimeKind]::Utc)
++    New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $utc.ToLocalTime()
++})
+ $action = New-ScheduledTaskAction -Execute "`"$python`"" `
+     -Argument "scripts\snapshot.py --runner local --out data\local_capture --upload better" `
+     -WorkingDirectory $repo
+@@ -33,4 +38,7 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME"
+ Register-ScheduledTask -TaskName "volsurf-snapshot" -Action $action -Trigger $triggers -Settings $settings `
+     -Principal $principal -Description "Backup daily option chain capture for Volatility-Surface-and-Event-Pricing" `
+     -Force | Out-Null
+-Write-Output "Registered volsurf-snapshot at $($times -join ', ') London, Monday to Friday, in $repo"
++Write-Output "Registered volsurf-snapshot at $($times -join ', ') UTC, Monday to Friday, in $repo"
++foreach ($t in (Get-ScheduledTask -TaskName "volsurf-snapshot").Triggers) {
++    Write-Output "StartBoundary $($t.StartBoundary)"
++}
+```
+
+The script was not run (step 1b.2 item 3). The trigger construction alone was checked on this machine (time zone `GMT Standard Time`) without registering anything:
+
+```
+2026-10-28T19:45:00Z    built from 2026-10-28 19:45 UTC, converted to local
+2026-10-28T20:45:00Z    built from 2026-10-28 20:45 UTC, converted to local
+2026-07-01T19:45:00Z    a BST date: 19:45 UTC is 20:45 local, stored back as 19:45Z
+```
+
+A DateTime without a kind is read as local time: `2026-07-01 19:45` with no kind gave `18:45:00Z`, which is why the script sets the UTC kind before converting.
+
+### 1b-D3. Forced capture run
+
+Run [40711619617](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/runs/40711619617), `gh workflow run snapshot.yml -f force=true`, on `5c013e5`. The push itself started no snapshot run, as expected (it changed no file the `push` trigger watches). Last 5 lines of the Capture step, the script's own output with yfinance's pandas deprecation warnings left out (the job's last raw lines are the artifact upload and a Node.js 20 notice). 37 tickers, 37 ok (at least 33 required); the 2026-10-28 snaplog already in `snapshots-test` had `n_ok` 32, so `better` replaced it:
+
+```
+2026-10-28T15:07:30.2447585Z UBER   ok      rows=   660 expiries= 11 failed=0    8.6s 
+2026-10-28T15:07:39.5214054Z SHOP   ok      rows=   916 expiries= 12 failed=0    9.3s 
+2026-10-28T15:07:48.7919533Z ABNB   ok      rows=   653 expiries= 12 failed=0    9.3s 
+2026-10-28T15:07:49.0587582Z 2026-10-28T15:07:49.051393+00:00 done ok=37 partial=0 error=0 rows=84065
+2026-10-28T15:07:52.2259741Z uploaded 4 files to release snapshots-test
+```
+
+The 5 new names in the same run:
+
+```
+2026-10-28T15:03:39.6608666Z MU     ok      rows=  6529 expiries= 18 failed=0   13.3s 
+2026-10-28T15:03:49.6307567Z INTC   ok      rows=  1641 expiries= 13 failed=0   10.0s 
+2026-10-28T15:04:19.4805201Z PANW   ok      rows=  1879 expiries= 13 failed=0    9.9s 
+2026-10-28T15:04:29.3828000Z AMAT   ok      rows=  1925 expiries= 13 failed=0    9.9s 
+2026-10-28T15:04:38.9055100Z LRCX   ok      rows=  1667 expiries= 12 failed=0    9.5s 
+```
+
+### 1b-D4. Tests, fresh clone, CI, push time
+
+`pytest -p socket --disable-socket -q` on Windows at `5c013e5`:
+
+```
+.........................................                                [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:894
+  C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Lib\site-packages\_pytest\config\__init__.py:894: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; socket
+    self.import_plugin(arg, consider_entry_points=True)
+
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+  C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Lib\site-packages\pandas\core\series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+41 passed, 5 warnings in 4.43s
+```
+
+`ruff check .`: `All checks passed!`
+
+Fresh clone of `origin/main` at `5c013e5`:
+
+```
+$ git clone https://github.com/uty101/Volatility-Surface-and-Event-Pricing vs1b
+$ git log --oneline -1
+5c013e5 section 1b: review decisions recorded
+$ uv venv --python 3.12
+$ uv pip install -r requirements-lock.txt
+$ uv pip install -e . --no-deps
+$ .venv/Scripts/pytest -p socket --disable-socket -q
+.........................................                                [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:894
+  C:\Users\astha\AppData\Local\Temp\vs1b\.venv\Lib\site-packages\_pytest\config\__init__.py:894: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; socket
+    self.import_plugin(arg, consider_entry_points=True)
+
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+  C:\Users\astha\AppData\Local\Temp\vs1b\.venv\Lib\site-packages\pandas\core\series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+41 passed, 5 warnings in 23.05s
+exit=0
+```
+
+CI: success on `5c013e5` (run 40711593427), the commit carrying all 3 steps and the decisions record.
+
+The last step commit reached `origin/main` at **2026-10-28 15:00:34 UTC** (push of `980bf69..5c013e5`), before the 19:15 UTC deadline. Tonight's 19:30 and 20:30 UTC Actions runs use 37 underlyings and `min_tickers_ok = 33`. This review and the status file go in 1 final commit pushed after it; that commit cannot carry its own push time or CI result.
+
+### 1b open questions
+
+- **O-27** How the prices stage was rerun mid-session (above). Implemented as (a).
+- **O-28** Where BXM alone from `[vrp] bxm_start` is reported. Nothing built yet; Section 8 needs it.
+
+### 1b owner action
+
+Re-register the local task: `powershell -ExecutionPolicy Bypass -File scripts\windows\register_snapshot_task.ps1`. Until then the registered task still fires at 19:30 and 20:30 UTC with `--upload if-missing`, at the same instants as Actions.
