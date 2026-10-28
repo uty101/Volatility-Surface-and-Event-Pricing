@@ -10,7 +10,7 @@ Section 0: plan, scaffolding and capture (kickoff Section 9, steps 0.0 to 0.2).
 - 0.1  01c1dcd  step 0.1: snapshot capture
 - 0.2  6a8de21  step 0.2: capture schedule (pushed to `main` at 2026-10-28 00:02 UTC; this push triggered the forced Actions run)
 
-Step 0.2 item 4b (registering the local scheduled task) was **not executed**: see Not verified.
+Step 0.2 item 4b (registering the local scheduled task) was refused by the permission system on the first attempt and registered on the owner's instruction afterwards: see Evidence, live check b.
 
 ## Evidence
 
@@ -227,7 +227,51 @@ github.com
   - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
 ```
 
-`gh` is installed (2.101.0) and authenticated, so the kickoff says to register the task. Running `scripts/windows/register_snapshot_task.ps1` was **refused by Claude Code's permission system**: the auto-mode classifier denied the PowerShell call and gave no reason. The denial was not worked around. The task is not registered, so `Get-ScheduledTask volsurf-snapshot | Format-List` and its next run time cannot be printed. The machine's time zone is `GMT Standard Time` (London), which the script checks before registering.
+`gh` is installed (2.101.0) and authenticated, so the kickoff says to register the task. The first attempt to run `scripts/windows/register_snapshot_task.ps1` was refused by Claude Code's permission system and was not worked around. The owner then told Claude Code to register it, and the second run succeeded. The machine's time zone is `GMT Standard Time` (London), which the script checks before registering.
+
+```
+Registered volsurf-snapshot at 19:30, 20:30 London, Monday to Friday, in C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing
+```
+
+`Get-ScheduledTask volsurf-snapshot | Format-List`:
+
+```
+Actions            : {MSFT_TaskExecAction}
+Description        : Backup daily option chain capture for Volatility-Surface-and-Event-Pricing
+Principal          : MSFT_TaskPrincipal2
+Settings           : MSFT_TaskSettings3
+State              : Ready
+TaskName           : volsurf-snapshot
+TaskPath           : \
+Triggers           : {MSFT_TaskWeeklyTrigger, MSFT_TaskWeeklyTrigger}
+URI                : \volsurf-snapshot
+```
+
+`Get-ScheduledTaskInfo volsurf-snapshot`, then triggers, action, settings and principal:
+
+```
+NextRunTime    : 28/10/2026 19:30:00
+LastRunTime    : 30/11/1999 00:00:00
+LastTaskResult : 267011
+
+StartBoundary             DaysOfWeek Enabled
+-------------             ---------- -------
+2026-10-28T19:30:00+00:00         62    True
+2026-10-28T20:30:00+00:00         62    True
+
+Execute          : "C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Scripts\python.exe"
+Arguments        : scripts\snapshot.py --runner local --out data\local_capture --upload if-missing
+WorkingDirectory : C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing
+
+StartWhenAvailable         : True
+DisallowStartIfOnBatteries : False
+StopIfGoingOnBatteries     : False
+
+UserId    : astha
+LogonType : Interactive
+```
+
+DaysOfWeek 62 is the bitmask for Monday to Friday. `LastTaskResult` 267011 means the task has not run yet. Both StartBoundary values carry a `+00:00` offset, so Task Scheduler pins the triggers to UTC, not to London wall-clock time. These are the same instants as the Actions crons (19:30 and 20:30 UTC), so 1 of them falls at 15:30 New York on both sides of the US clock change. When the UK moves to BST on 2027-03-28 they will fire at 20:30 and 21:30 London time, not at the configured `local_task_times_london`. This is reported, not changed (rule 15).
 
 ### Live check c: Actions run triggered by the push
 
@@ -342,7 +386,7 @@ Not required for Section 0 (rule 12 starts at Section 1). The `ci` workflow on t
 
 ## Not verified
 
-- **Step 0.2 item 4b: the local scheduled task is not registered.** The permission system refused the call. The owner can register it from the repo root in PowerShell with `powershell -ExecutionPolicy Bypass -File scripts\windows\register_snapshot_task.ps1`, then print `Get-ScheduledTask volsurf-snapshot | Format-List` and `Get-ScheduledTaskInfo volsurf-snapshot`. Until then the Actions cron is the only capture.
+- The local task has not fired yet. Its first run is 2026-10-28 19:30 UTC, at the same instant as the first Actions cron.
 - No scheduled (non-forced) run has happened yet. The first is due at 2026-10-28 19:30 UTC (15:30 New York). The 20:30 UTC cron that day falls at 16:30 New York; by the time the runner reaches the window check it should be past 16:30:00 and log a skip.
 - The `--upload if-missing` path has not been run.
 - The share of `^SPX` rows with bid > 0 inside the session is not yet known; this run was after the close.
