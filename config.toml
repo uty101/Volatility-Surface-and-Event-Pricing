@@ -74,6 +74,8 @@ rv_min_days = 20
 
 [vrp]
 start = "1990-01-02"
+strategy_start = "2007-01-31"
+bxm_start = "2002-03-28"
 horizon = 21
 garch_min_obs = 1000
 switch_cost_bp = 10

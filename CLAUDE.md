@@ -148,3 +148,6 @@ def build_risk_report(day: date, grid, greeks, breaches, out_path: Path) -> Path
 - **spec_log.csv**: run_utc, spec_id, description, params_json, sharpe, n_months
 
 ## Amendments
+
+- Instruction 01b. Research question 4 reads: Since 1990, how large is the gap between implied variance (VIX squared) and the realised variance that followed, does a GARCH forecast predict it, and from 2007 does selling S&P 500 puts (Cboe PUT) pay after costs, with or without timing on implied minus GARCH variance? Strategy backtests use month ends from `[vrp] strategy_start`; BXM is also shown alone from `[vrp] bxm_start`.
+- Instruction 01b. `[universe] xlk_holdings` has 15 names; `[snapshot] min_tickers_ok` is 33; the local task runs at `[snapshot] local_task_times_utc`.
