@@ -39,3 +39,12 @@ Decisions from the session 1 review (instruction 01b, part B).
 - **Status 6** (small interpretations). All accepted as implemented. Each matches the spec's intent.
 - **O-25** (a), a trailing `note` column. No reason given.
 - **O-26** (a), keep both. No reason given.
+
+## Session 1d
+
+Decisions from instruction 01d, part B. Instruction 01d replaces 01c in full; 01c's decisions are recorded here because 01c stopped at its gate.
+
+- **Fixture source** (replaces O-4). `snapshots-test` assets `test_chains_2026-10-28.parquet`, `test_underlying_2026-10-28.csv`, `test_earnings_2026-10-28.csv`, `test_snaplog_2026-10-28.json` from run 40711619617. Fixture day 2026-10-28. The run started at 11:00:58 New York, inside the session, with 37 of 37 tickers ok; the after-close run on 2026-10-27 had only 4.4% of `^SPX` rows with a live bid. The 01c rule against `test_` assets is lifted for this one file set only.
+- **O-27** (b), as instruction 01c step 1c.3. `pull_data.py` ends every Yahoo history at the last completed XNYS session, so a rerun during the US session can never store an intraday price as a close. The same trap would come back on every future rerun; the fix belongs in the code, not in a one-off call.
+- **O-28** (a). A `bxm_long` row in `strategy_stats.csv` and a dashed line on `vrp_cumulative.png`, labelled as a separate window. One table and one chart keep the comparison in one place.
+- **01c snap_utc window test.** Dropped. The 15:25 to 16:30 window is a property of scheduled runs and is already tested in `test_snapshots.py`; a fixture taken at 11:00 New York does not need it.
