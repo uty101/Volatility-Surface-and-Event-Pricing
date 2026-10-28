@@ -105,6 +105,41 @@ def clean_chain(chains: pd.DataFrame, underlying: pd.DataFrame, cfg) -> tuple[pd
     return clean.reset_index(drop=True), pd.DataFrame(log, columns=CLEAN_LOG_COLUMNS)
 
 
+CAPTURE_HEALTH_COLUMNS = [
+    "session", "runner", "start_ny", "ny_start", "minutes_after_1530", "tickers_ok", "rows", "after_close_rows",
+    "gap",
+]
+
+
+def capture_health(snap_dir: Path, first_session: date, cfg) -> pd.DataFrame:
+    """PLAN 1.4: one row per XNYS session from first_session to the last downloaded day. A session is a gap
+    when it has no non-test chains asset (O-5 (b)); test_ assets are ignored."""
+    snap_dir = Path(snap_dir)
+    days = sorted(date.fromisoformat(p.stem.removeprefix("chains_")) for p in snap_dir.glob("chains_*.parquet"))
+    if not days or days[-1] < first_session:
+        return pd.DataFrame(columns=CAPTURE_HEALTH_COLUMNS)
+    close_ny = time.fromisoformat(cfg.snapshot.close_ny)
+    target_ny = time.fromisoformat("15:30")  # instruction 01, step 1.4: minutes after 15:30 New York
+    rows = []
+    for session in _xnys().sessions_in_range(pd.Timestamp(first_session), pd.Timestamp(days[-1])):
+        d = session.date()
+        row = dict.fromkeys(CAPTURE_HEALTH_COLUMNS)
+        row.update(session=d.isoformat(), gap=d not in days)
+        if not row["gap"]:
+            chains = pd.read_parquet(snap_dir / f"chains_{d.isoformat()}.parquet", columns=["snap_utc"])
+            snap_ny = pd.to_datetime(chains["snap_utc"], utc=True).dt.tz_convert(NY)
+            row.update(rows=len(chains), after_close_rows=int((snap_ny.dt.time > close_ny).sum()))
+            log_path = snap_dir / f"snaplog_{d.isoformat()}.json"
+            if log_path.exists():
+                log = json.loads(log_path.read_text(encoding="utf-8"))
+                start = pd.Timestamp(log["ny_start"]).tz_convert(NY)
+                target = pd.Timestamp.combine(start.date(), target_ny).tz_localize(NY)
+                row.update(runner=log["runner"], start_ny=start.strftime("%H:%M:%S"), ny_start=start.isoformat(),
+                           minutes_after_1530=(start - target).total_seconds() / 60, tickers_ok=log["n_ok"])
+        rows.append(row)
+    return pd.DataFrame(rows, columns=CAPTURE_HEALTH_COLUMNS)
+
+
 def _cmt_to_continuous(y: float) -> float:
     """Convention 4.6: bond-equivalent CMT yield y in percent -> continuous r = 2 ln(1 + y/200)."""
     return 2.0 * np.log1p(y / 200.0)
