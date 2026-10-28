@@ -101,6 +101,31 @@ def test_rule_e_spx_deferred():
     assert e["rows_dropped"] == 0 and e["note"] == "deferred to section 3"
 
 
+def test_rule_e_spx_european_bounds():
+    # forward F = 100 with D = 0.99 (instruction 03 step 3.1): European bounds of Section 5.3
+    forwards = pd.DataFrame({"expiry": ["2026-11-20"], "D": [0.99], "F": [100.0], "status": ["ok"]})
+    rows = GOOD + [
+        ("s1", "C", 80, 19.6, 19.7),  # call mid 19.65 below D(F - K) = 19.8
+        ("s2", "C", 1, 99.0, 99.1),  # call mid 99.05 at or above D F = 99
+        ("s3", "P", 120, 19.7, 19.75),  # put mid 19.725 below D(K - F) = 19.8
+        ("s4", "P", 10, 9.9, 10.0),  # put mid 9.95 at or above D K = 9.9
+        ("s5", "C", 80, 19.85, 19.95),  # call mid 19.9 inside
+    ]
+    clean, log = clean_chain(chain(rows, "^SPX"), underlying({"^SPX": 100.0}), CFG, forwards=forwards)
+    assert kept_ids(clean) == ["ok1", "ok2", "s5"]
+    e = log[log["rule"] == "e"].iloc[0]
+    assert e["rows_dropped"] == 4 and e["note"] == ""
+
+
+def test_rule_e_spx_parity_fail_expiry_kept_unchecked():
+    forwards = pd.DataFrame({"expiry": ["2026-11-20"], "D": [0.99], "F": [float("nan")], "status": ["parity_fail"]})
+    clean, log = clean_chain(chain(GOOD + [("s1", "C", 80, 19.6, 19.7)], "^SPX"), underlying({"^SPX": 100.0}), CFG,
+                             forwards=forwards)
+    assert kept_ids(clean) == ["ok1", "ok2", "s1"]
+    e = log[log["rule"] == "e"].iloc[0]
+    assert e["rows_dropped"] == 0 and e["note"] == "3 rows on parity_fail expiries not checked"
+
+
 def test_rule_order():
     clean, log = run(GOOD + [("ad", "C", 100, 0.0, 1.0)])  # bid <= 0 and spread 1.0 / 0.5 > 0.5
     assert kept_ids(clean) == ["ok1", "ok2"]

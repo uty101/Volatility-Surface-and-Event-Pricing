@@ -14,7 +14,7 @@ from volsurf.snapshots import NY, _xnys
 
 CLEAN_LOG_COLUMNS = ["day", "ticker", "rule", "rows_before", "rows_dropped", "note"]
 SPX = "^SPX"
-SPX_RULE_E_NOTE = "deferred to section 3"  # instruction 01, step 1.3 (O-23 (b))
+SPX_RULE_E_NOTE = "deferred to section 3"  # instruction 01, step 1.3 (O-23 (b)), when no forwards are given
 
 # Convention 4.6: CMT tenors in years
 RATE_TENORS = {"DGS1MO": 1 / 12, "DGS3MO": 0.25, "DGS6MO": 0.5, "DGS1": 1.0}
@@ -65,6 +65,13 @@ def _american_in_bounds(mid: pd.Series, kind: pd.Series, strike: pd.Series, spot
     return np.where(kind == "C", call, put)
 
 
+def _european_in_bounds(mid, kind, strike, F, D):
+    """Section 5.3 European bounds: call in (max(D(F - K), 0), D F), put in (max(D(K - F), 0), D K)."""
+    call = (mid > np.maximum(D * (F - strike), 0.0)) & (mid < D * F)
+    put = (mid > np.maximum(D * (strike - F), 0.0)) & (mid < D * strike)
+    return np.where(kind == "C", call, put)
+
+
 def _stale(chain: pd.DataFrame, stale_sessions: int) -> pd.Series:
     """Convention 4.4: last trade more than stale_sessions sessions before the snapshot, or missing."""
     snap_days = pd.to_datetime(chain["snap_utc"], utc=True).dt.tz_convert(NY).dt.date
@@ -75,8 +82,14 @@ def _stale(chain: pd.DataFrame, stale_sessions: int) -> pd.Series:
     return pd.Series(out, index=chain.index, dtype=bool)
 
 
-def clean_chain(chains: pd.DataFrame, underlying: pd.DataFrame, cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Convention 4.4 rules a to e in order, one CLEAN_LOG row per ticker and rule; flags stale and after_close."""
+def clean_chain(chains: pd.DataFrame, underlying: pd.DataFrame, cfg,
+                forwards: pd.DataFrame | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Convention 4.4 rules a to e in order, one CLEAN_LOG row per ticker and rule; flags stale and after_close.
+
+    Rule e for `^SPX` uses the European bounds with each expiry's D and F from `forwards` (columns expiry, D, F,
+    status; instruction 03 step 3.1). Rows of an expiry without an accepted forward cannot be checked and are
+    kept (the IV step flags them parity_fail), with their count in the note. Without `forwards`, rule e for
+    `^SPX` is deferred as in Section 1 (O-23 (b))."""
     c = cfg.clean
     close_ny = time.fromisoformat(cfg.snapshot.close_ny)
     spot_by_ticker = underlying.set_index("ticker")["price"]
@@ -91,8 +104,16 @@ def clean_chain(chains: pd.DataFrame, underlying: pd.DataFrame, cfg) -> tuple[pd
             ("c", ~(mid >= c.min_mid), ""),
             ("d", ~((chain["ask"] - chain["bid"]) / mid <= c.max_rel_spread), ""),
         ]
-        if ticker == SPX:
+        if ticker == SPX and forwards is None:
             rules.append(("e", pd.Series(False, index=chain.index), SPX_RULE_E_NOTE))
+        elif ticker == SPX:
+            fw = forwards[forwards["status"] == "ok"].set_index("expiry")
+            F, D = chain["expiry"].map(fw["F"]), chain["expiry"].map(fw["D"])
+            inside = _european_in_bounds(mid, chain["kind"], chain["strike"], F, D)
+            unchecked = F.isna()
+            n_unchecked = int((unchecked & ~pd.concat([d for _, d, _ in rules], axis=1).any(axis=1)).sum())
+            rules.append(("e", ~pd.Series(inside, index=chain.index) & ~unchecked,
+                          f"{n_unchecked} rows on parity_fail expiries not checked" if n_unchecked else ""))
         else:
             inside = _american_in_bounds(mid, chain["kind"], chain["strike"], spot)
             rules.append(("e", ~pd.Series(inside, index=chain.index), ""))

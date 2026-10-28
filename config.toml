@@ -43,7 +43,8 @@ min_vega = 1e-6
 
 [forwards]
 parity_n_strikes = 10
-parity_r2_min = 0.9999
+parity_min_pairs = 5
+parity_mad_max_bp = 2.0
 
 [svi]
 min_quotes = 8

@@ -3,7 +3,7 @@ day,ticker,rule,rows_before,rows_dropped,note
 2026-10-28,^SPX,b,10923,0,
 2026-10-28,^SPX,c,10923,0,
 2026-10-28,^SPX,d,10923,256,
-2026-10-28,^SPX,e,10667,0,deferred to section 3
+2026-10-28,^SPX,e,10667,335,
 2026-10-28,SPY,a,7466,640,
 2026-10-28,SPY,b,6826,1,
 2026-10-28,SPY,c,6825,476,
