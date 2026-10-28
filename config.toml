@@ -125,3 +125,5 @@ gamma = 4e-6
 vega = 6e-5
 vanna = 1.2e-5
 volga = 5e-4
+theta = 3e-5
+rho = 1e-6
