@@ -3,9 +3,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from volsurf.config import load_config
+from volsurf.data import clean_chain
 from volsurf.snapshots import CHAINS_COLUMNS
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests" / "fixtures"
+CSV = {"index": False, "float_format": "%.10g", "lineterminator": "\n", "encoding": "utf-8"}
 
 
 def _chains() -> pd.DataFrame:
@@ -32,3 +36,11 @@ def test_spx_near_money_bids_live():
 
 def test_chains_column_order_is_schema():
     assert list(_chains().columns) == CHAINS_COLUMNS
+
+
+def test_clean_log_fixture_reproduced(tmp_path):
+    underlying = pd.read_csv(FIXTURES / "underlying_sample.csv")
+    _, log = clean_chain(_chains(), underlying, load_config(ROOT / "config.toml"))
+    log.to_csv(tmp_path / "clean_log_fixture.csv", **CSV)
+    expected = (ROOT / "outputs" / "tables" / "clean_log_fixture.csv").read_bytes()
+    assert (tmp_path / "clean_log_fixture.csv").read_bytes() == expected
