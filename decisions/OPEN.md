@@ -107,5 +107,7 @@ Items are appended as they are found. Each has 2 concrete options; the reviewer 
 ## Found in session 2
 
 **O-29 EEP row status vocabulary (2.3).** Instruction 02 says rows where either solve fails "get a status and stay in the row table with blank vols", without naming the statuses or saying whether a one-sided failure blanks the vol that did solve. (a) `ok`, `american_fail`, `european_fail`, `both_fail`; on any failure both vols and the premium are blank. (b) `ok` and a single `solve_fail`; the vol that solved is kept and only the premium is blank. Implemented as (a) so that step 2.3 could be built; the reviewer may switch it.
+*Decided in instruction 03: (a). See `decisions/section_2_review.md`.*
 
 **O-30 The per-underlying total row of `book_greeks` (2.2).** Instruction 02 asks for 1 total row per underlying but does not say how it is marked. (a) The total row carries `expiry = total` and follows that underlying's expiry rows; columns underlying, expiry, delta, gamma, vega, theta, rho, vanna, volga, in code units (Convention 4.10) × quantity × 100. (b) Blank `expiry` on the total row plus a `level` column (`expiry` or `underlying`). Implemented as (a); the reviewer may switch it.
+*Decided in instruction 03: (a). See `decisions/section_2_review.md`.*
