@@ -1,0 +1,50 @@
+name: snapshot
+
+on:
+  schedule:
+    - cron: "30 19 * * 1-5"
+    - cron: "30 20 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignore the session and window checks and write to the test release"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/snapshot.yml
+      - scripts/snapshot.py
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install from the lock
+        run: |
+          uv venv --python 3.12
+          uv pip install -r requirements-lock.txt
+          uv pip install -e . --no-deps
+      - name: Capture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          FORCE_INPUT: ${{ inputs.force }}
+        run: |
+          FORCE=""
+          if [ "$EVENT" = "push" ]; then FORCE="--force"; fi
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" = "true" ]; then FORCE="--force"; fi
+          .venv/bin/python scripts/snapshot.py $FORCE --runner actions --out snap --upload always
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snap-${{ github.run_id }}
+          path: snap/
+          retention-days: 7
+          if-no-files-found: ignore

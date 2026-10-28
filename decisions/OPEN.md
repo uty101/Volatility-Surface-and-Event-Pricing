@@ -61,3 +61,4 @@ Items are appended as they are found. Each has 2 concrete options; the reviewer 
 6. Upload failure: (a) files stay in `--out`, a line is logged, and the exit code is 2 (1 takes precedence when too few tickers succeeded). (b) Exit code 0 on upload failure.
 7. `snap_utc` in UNDERLYING: (a) the UTC time the ticker's capture started (before its first chain). (b) The UTC time its 1-minute price was fetched (after its chains).
 8. Ticker with a price and chain rows but a failed `options` listing cannot happen (no expiries means no rows); a ticker whose earnings call fails keeps its chain status and records `earnings_error` in SNAPLOG. (a) Earnings failures do not affect status. (b) They make the ticker `partial`.
+9. Local task power settings (step 0.2): Task Scheduler's defaults skip a run on battery and stop it when power is unplugged. (a) The task starts on battery and keeps running when unplugged. (b) Windows defaults.
