@@ -27,7 +27,7 @@
       }
     },
     "prices": {
-      "pulled_utc": "2026-10-28T12:44:47.167681+00:00",
+      "pulled_utc": "2026-10-28T14:56:50.962009+00:00",
       "versions": {
         "python": "3.12.13",
         "yfinance": "1.7.0",
@@ -164,21 +164,21 @@
     },
     "prices/close.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-29, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-10-28T12:44:47.167681+00:00",
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-28, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-10-28T14:56:50.962009+00:00",
       "rows": 9293,
       "first_date": "1989-12-01",
       "last_date": "2026-10-27",
-      "sha256": "1a86d3b1f6aca7d9416b6b72c449763943c49b9848df7f7e96ffcc9438df23e6"
+      "sha256": "7d1a6c0d0b32018017d1a94fe26cdc1bbad198b0d29843e863f9675e20aee665"
     },
     "prices/dividends.csv": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-29, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-10-28T12:44:47.167681+00:00",
-      "rows": 2181,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-28, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-10-28T14:56:50.962009+00:00",
+      "rows": 2479,
       "first_date": "1989-12-05",
-      "last_date": "2026-10-09",
-      "sha256": "e6be77d5f5a59e2fae5afe95f0f851de1b215630ea82566370a54cc0f3fd2ea1"
+      "last_date": "2026-10-14",
+      "sha256": "4f0eee3ba5a81ff07a6c8ed872510d1a5bcf906e9ef1422efd64cfc264628262"
     },
     "prices/index.parquet": {
       "stage": "prices",

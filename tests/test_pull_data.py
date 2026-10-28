@@ -56,6 +56,12 @@ def test_xlk_names_in_holdings():
         assert name in tickers, name
 
 
+def test_xlk_names_cover_70_percent():
+    holdings = _holdings()
+    assert len(CFG.universe.xlk_holdings) == 15
+    assert holdings.loc[holdings["ticker"].isin(CFG.universe.xlk_holdings), "weight"].sum() >= 0.70
+
+
 class _Resp:
     def __init__(self, content: bytes):
         self.content = content
@@ -107,11 +113,11 @@ def test_pull_uses_fake_session(tmp_path):
     holdings = pd.read_csv(tmp_path / "ssga" / "xlk_holdings_2026-10-28.csv")
     assert list(holdings.columns) == ["ticker", "name", "weight", "shares", "as_of_date"]
     close = pd.read_parquet(tmp_path / "prices" / "close.parquet")
-    assert close.index.tolist() == [date(2026, 10, 26), date(2026, 10, 27)] and close.shape[1] == 31
+    assert close.index.tolist() == [date(2026, 10, 26), date(2026, 10, 27)] and close.shape[1] == 36
     assert pd.read_parquet(tmp_path / "prices" / "index.parquet").columns.tolist() == ["^GSPC", "^SP500TR"]
     assert pd.read_parquet(tmp_path / "prices" / "sectors.parquet")["XLK"].tolist() == [9.5, 10.5]
     divs = pd.read_csv(tmp_path / "prices" / "dividends.csv")
-    assert len(divs) == 31 and (divs["date"] == "2026-10-27").all() and (divs["dividend"] == 0.25).all()
+    assert len(divs) == 36 and (divs["date"] == "2026-10-27").all() and (divs["dividend"] == 0.25).all()
     manifest = json.loads((tmp_path / "MANIFEST.json").read_text())
     assert set(manifest["stages"]) == {"cboe", "fred", "prices", "ssga"}
     for name, entry in manifest["files"].items():

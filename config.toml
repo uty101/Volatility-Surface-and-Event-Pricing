@@ -4,7 +4,7 @@ seed = 20261028
 [universe]
 index = ["^SPX"]
 etfs = ["SPY", "QQQ", "XLK", "XLE", "XLF"]
-xlk_holdings = ["NVDA", "AAPL", "MSFT", "AVGO", "ORCL", "AMD", "CSCO", "CRM", "IBM", "PLTR"]
+xlk_holdings = ["NVDA", "AAPL", "MSFT", "AMD", "AVGO", "MU", "INTC", "PLTR", "CSCO", "PANW", "AMAT", "LRCX", "ORCL", "CRM", "IBM"]
 singles = ["AMZN", "META", "GOOGL", "TSLA", "NFLX", "JPM", "BAC", "XOM", "CVX", "UNH", "WMT", "HD", "DIS", "UBER", "SHOP", "ABNB"]
 max_days_to_expiry = 400
 sector_spdrs = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY"]
@@ -20,7 +20,7 @@ retries = 3
 backoff_s = [5, 15, 45]
 release_tag = "snapshots"
 test_release_tag = "snapshots-test"
-min_tickers_ok = 28
+min_tickers_ok = 33
 
 [clean]
 min_mid = 0.05
