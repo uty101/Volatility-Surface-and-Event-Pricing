@@ -49,3 +49,15 @@ Items are appended as they are found. Each has 2 concrete options; the reviewer 
 **O-23 Rule e for `^SPX` in Section 1 (1.3).** The European bounds need the parity D and F that Section 3.1 builds. (a) In Section 1, rule e for `^SPX` uses D and F from Conventions 4.6 and 4.8 with q = 0 only as a placeholder, and Section 3 reruns cleaning on the parity forward. (b) Rule e is skipped for `^SPX` in Section 1 (logged as 0 rows with a note) and applied in Section 3 after the parity forward exists.
 
 **O-24 IV solvers for the EEP table (2.3).** `iv_american` and `iv_european` belong to Section 3. (a) Step 2.3 solves both vols with `scipy.optimize.brentq` on `crr` and `bsm` directly. (b) Step 2.3's table is built in Section 3 after step 3.2.
+
+## Found in session 0 while building the capture (step 0.1)
+
+**O-22 Capture details the kickoff leaves open.** Implemented as option (a) in each case so that capture could start on 2026-10-28; rule 15 means only an instruction file can change them. (a) is what runs now.
+1. Window bounds: (a) inclusive at both ends, 15:25:00 ≤ New York time ≤ 16:30:00. (b) Start inclusive, end exclusive.
+2. `snap_utc` in CHAINS: (a) the UTC time each expiry's chain was fetched, so T is exact per expiry. (b) 1 time per underlying, taken when its first chain is fetched.
+3. Ticker success for `min_tickers_ok`: (a) status `ok` means the price and every kept expiry were fetched; `partial` (some expiries failed after retries) and `error` do not count. (b) `partial` also counts.
+4. Retries: (a) 1 attempt plus `retries` retries, sleeping `backoff_s[i]` before retry i. (b) `retries` attempts in total.
+5. Out-of-window log: (a) 1 line printed and appended to `<out>/snapshot.log`. (b) Printed only.
+6. Upload failure: (a) files stay in `--out`, a line is logged, and the exit code is 2 (1 takes precedence when too few tickers succeeded). (b) Exit code 0 on upload failure.
+7. `snap_utc` in UNDERLYING: (a) the UTC time the ticker's capture started (before its first chain). (b) The UTC time its 1-minute price was fetched (after its chains).
+8. Ticker with a price and chain rows but a failed `options` listing cannot happen (no expiries means no rows); a ticker whose earnings call fails keeps its chain status and records `earnings_error` in SNAPLOG. (a) Earnings failures do not affect status. (b) They make the ticker `partial`.
