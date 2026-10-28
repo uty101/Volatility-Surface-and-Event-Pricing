@@ -27,6 +27,7 @@ class Config:
     snapshot: object
     clean: object
     pricing: object
+    eep: object
     iv: object
     forwards: object
     svi: object

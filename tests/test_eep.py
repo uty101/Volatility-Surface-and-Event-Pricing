@@ -1,8 +1,10 @@
+import itertools
 from datetime import date, time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from volsurf.config import load_config
 from volsurf.data import RATE_TENORS
@@ -11,6 +13,7 @@ from volsurf.pricing import (
     EEP_SUMMARY_COLUMNS,
     crr,
     eep_rows,
+    eep_solve,
     eep_summary,
     time_to_expiry,
 )
@@ -63,3 +66,26 @@ def test_eep_failed_solve_keeps_row_with_status():
     assert rows.loc[0, "status"] == "both_fail"
     assert rows[["iv_american", "iv_european", "premium_vol_pts"]].isna().all(axis=None)
     assert eep_summary(rows).empty
+
+
+# instruction 03 step 3.0 item 5: the 2.1 grid's calls, with q = 0
+GRID_CALLS = list(itertools.product([70, 80, 90, 100, 110, 120, 130], [7, 30, 91, 182, 365, 730], [0.15, 0.30, 0.60]))
+
+
+@pytest.mark.parametrize(("K", "days", "sigma"), GRID_CALLS, ids=[f"K{K}-d{d}-s{s}" for K, d, s in GRID_CALLS])
+def test_american_call_no_dividend_premium_zero_on_matched_trees(K, days, sigma):
+    S, T, r, q = 100.0, days / 365, 0.045, 0.0
+    n = CFG.pricing.n_prod
+    mid = crr(S, K, T, r, q, sigma, "C", n, True)
+    assert abs(crr(S, K, T, r, q, sigma, "C", n, True) - crr(S, K, T, r, q, sigma, "C", n, False)) <= 1e-12
+    out = eep_solve(mid, S, K, T, r, q, "C", CFG)
+    if out["status"] == "both_fail":
+        # a deep ITM call priced at the sigma-free limit has no IV in [iv_lo, iv_hi]; both trees fail alike
+        assert crr(S, K, T, r, q, CFG.iv.iv_lo, "C", n, True) >= mid
+        return
+    assert out["status"] in ("ok", "low_vega")
+    assert abs(out["premium_price"]) <= 1e-12
+    if out["status"] == "ok":
+        assert abs(out["premium_vol_pts"]) <= 1e-6
+    else:
+        assert np.isnan(out["premium_vol_pts"])

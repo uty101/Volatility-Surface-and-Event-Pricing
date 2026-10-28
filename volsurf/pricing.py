@@ -1,5 +1,5 @@
 """BSM, Black-76, the CRR tree and the early exercise premium (PLAN 2.1, kickoff Section 5.1), and the early
-exercise premium table (PLAN 2.3, instruction 02 step 2.3)."""
+exercise premium table (PLAN 2.3, instruction 02 step 2.3, instruction 03 step 3.0)."""
 
 from __future__ import annotations
 
@@ -15,9 +15,10 @@ from volsurf.snapshots import NY
 
 EEP_ROW_COLUMNS = [
     "ticker", "expiry", "kind", "strike", "contract_symbol", "snap_utc", "bid", "ask", "mid", "S", "T", "r", "q",
-    "F", "k", "k_bin", "iv_american", "iv_european", "premium_vol_pts", "status",
+    "F", "k", "k_bin", "iv_american", "iv_european", "premium_vol_pts", "premium_price", "premium_pct_mid", "status",
 ]
-EEP_SUMMARY_COLUMNS = ["ticker", "kind", "k_bin", "n", "median_vol_pts", "max_vol_pts"]
+EEP_SUMMARY_COLUMNS = ["ticker", "kind", "k_bin", "n", "median_vol_pts", "max_vol_pts", "median_pct_mid",
+                       "max_pct_mid"]
 # O-8 (a), decided in instruction 01: k = ln(K/F) bins, right-closed
 K_BIN_EDGES = [-np.inf, -0.10, -0.02, 0.02, 0.10, np.inf]
 K_BIN_LABELS = ["(-inf, -0.10]", "(-0.10, -0.02]", "(-0.02, 0.02]", "(0.02, 0.10]", "(0.10, inf)"]
@@ -98,12 +99,8 @@ def time_to_expiry(expiry: str, snap_utc, close_ny: time) -> float:
     return (end - pd.Timestamp(snap_utc)).total_seconds() / (365 * 86400)  # Convention 4.1
 
 
-def _american_price(sigma, S, K, T, r, q, kind, n) -> float:
-    return crr(S, K, T, r, q, sigma, kind, n, True)
-
-
-def _european_price(sigma, S, K, T, r, q, kind) -> float:
-    return float(bsm(S, K, T, r, q, sigma, kind))
+def _tree_price(sigma, S, K, T, r, q, kind, n, american) -> float:
+    return crr(S, K, T, r, q, sigma, kind, n, american)
 
 
 def _implied_vol(price, args: tuple, mid: float, lo: float, hi: float) -> float:
@@ -114,16 +111,38 @@ def _implied_vol(price, args: tuple, mid: float, lo: float, hi: float) -> float:
         return np.nan
 
 
+def eep_solve(mid, S, K, T, r, q, kind, cfg) -> dict:
+    """Instruction 03 step 3.0 for one quote: the American and European IVs, each by brentq on a CRR tree at
+    n_prod (American and European) minus the mid, so the tree's discretisation error cancels between them; the
+    premium in vol points (European IV - American IV) x 100; and the premium in price, CRR American - CRR
+    European at n_prod, both at the American IV, also as a percent of the mid. A failed solve blanks both vols
+    and every premium (O-29 (a)); where BSM vega per vol point at the American IV is below [eep] min_vega_pt the
+    vol premium is blank with status low_vega."""
+    from volsurf.greeks import greeks  # volsurf.greeks imports this module
+
+    lo, hi, n = cfg.iv.iv_lo, cfg.iv.iv_hi, cfg.pricing.n_prod
+    iv_a = _implied_vol(_tree_price, (S, K, T, r, q, kind, n, True), mid, lo, hi)
+    iv_e = _implied_vol(_tree_price, (S, K, T, r, q, kind, n, False), mid, lo, hi)
+    fail_a, fail_e = np.isnan(iv_a), np.isnan(iv_e)
+    if fail_a or fail_e:
+        status = "both_fail" if fail_a and fail_e else "american_fail" if fail_a else "european_fail"
+        return {"iv_american": np.nan, "iv_european": np.nan, "premium_vol_pts": np.nan, "premium_price": np.nan,
+                "premium_pct_mid": np.nan, "status": status}
+    premium_price = early_exercise_premium(S, K, T, r, q, iv_a, kind, n)
+    vega_pt = float(greeks(S, K, T, r, q, iv_a, kind)["vega"]) / 100  # Convention 4.10: per vol point
+    low_vega = vega_pt < cfg.eep.min_vega_pt
+    return {"iv_american": iv_a, "iv_european": iv_e, "premium_vol_pts": np.nan if low_vega else (iv_e - iv_a) * 100,
+            "premium_price": premium_price, "premium_pct_mid": premium_price / mid * 100,
+            "status": "low_vega" if low_vega else "ok"}
+
+
 def eep_rows(clean: pd.DataFrame, underlying: pd.DataFrame, fred: dict[str, pd.DataFrame], divs: pd.DataFrame,
              day: date, cfg) -> pd.DataFrame:
-    """Instruction 02 step 2.3, one row per clean contract of every American chain: the American IV (CRR at
-    n_prod) and the European IV (BSM) on the same mid, each by brentq on [iv_lo, iv_hi] (O-24 (a)), and the
-    premium (European IV - American IV) x 100 in vol points. S from UNDERLYING, r from rate_curve(day) at the
-    row's T, q from dividend_yield, T by Convention 4.1, F and k by Conventions 4.8 and 4.9. A failed solve keeps
-    the row with a status (O-29) and blank vols."""
+    """Instruction 02 step 2.3 with instruction 03 step 3.0, one row per clean contract of every American chain:
+    `eep_solve` on the mid. S from UNDERLYING, r from rate_curve(day) at the row's T, q from dividend_yield, T by
+    Convention 4.1, F and k by Conventions 4.8 and 4.9."""
     close_ny = time.fromisoformat(cfg.snapshot.close_ny)
     curve = rate_curve(fred, day)
-    lo, hi, n = cfg.iv.iv_lo, cfg.iv.iv_hi, cfg.pricing.n_prod
     spot = underlying.set_index("ticker")["price"]
     out = []
     for ticker, chain in clean[~clean["ticker"].isin(cfg.universe.index)].groupby("ticker", sort=False):
@@ -135,29 +154,24 @@ def eep_rows(clean: pd.DataFrame, underlying: pd.DataFrame, fred: dict[str, pd.D
             r = curve(T)
             mid = (row.bid + row.ask) / 2  # Convention 4.3
             F = S * np.exp((r - q) * T)  # Convention 4.8
-            iv_a = _implied_vol(_american_price, (S, K, T, r, q, kind, n), mid, lo, hi)
-            iv_e = _implied_vol(_european_price, (S, K, T, r, q, kind), mid, lo, hi)
-            fail_a, fail_e = np.isnan(iv_a), np.isnan(iv_e)
-            status = ("both_fail" if fail_a and fail_e else "american_fail" if fail_a
-                      else "european_fail" if fail_e else "ok")
-            if status != "ok":
-                iv_a = iv_e = np.nan
             out.append({"ticker": ticker, "expiry": row.expiry, "kind": kind, "strike": K,
                         "contract_symbol": row.contract_symbol, "snap_utc": row.snap_utc, "bid": row.bid,
                         "ask": row.ask, "mid": mid, "S": S, "T": T, "r": r, "q": q, "F": F, "k": np.log(K / F),
-                        "iv_american": iv_a, "iv_european": iv_e, "premium_vol_pts": (iv_e - iv_a) * 100,
-                        "status": status})
+                        **eep_solve(mid, S, K, T, r, q, kind, cfg)})
     rows = pd.DataFrame(out, columns=EEP_ROW_COLUMNS)
     rows["k_bin"] = pd.cut(rows["k"], K_BIN_EDGES, labels=K_BIN_LABELS).astype(str)
     return rows
 
 
 def eep_summary(rows: pd.DataFrame) -> pd.DataFrame:
-    """Median and max premium in vol points per (ticker, kind, k bin) over rows with status ok; tickers in row
-    order, kinds C then P, bins in k order."""
+    """Median and max premium, in vol points and as a percent of the mid, per (ticker, kind, k bin) over the rows
+    with a vol premium (status ok, instruction 03 step 3.0); tickers in row order, kinds C then P, bins in k
+    order."""
     ok = rows[rows["status"] == "ok"]
-    summary = (ok.groupby(["ticker", "kind", "k_bin"], sort=False)["premium_vol_pts"]
-               .agg(n="size", median_vol_pts="median", max_vol_pts="max").reset_index())
+    summary = (ok.groupby(["ticker", "kind", "k_bin"], sort=False)
+               .agg(n=("premium_vol_pts", "size"), median_vol_pts=("premium_vol_pts", "median"),
+                    max_vol_pts=("premium_vol_pts", "max"), median_pct_mid=("premium_pct_mid", "median"),
+                    max_pct_mid=("premium_pct_mid", "max")).reset_index())
     tickers = {t: i for i, t in enumerate(pd.unique(rows["ticker"]))}
     order = pd.DataFrame({"t": summary["ticker"].map(tickers), "kind": summary["kind"],
                           "b": summary["k_bin"].map(K_BIN_LABELS.index)})

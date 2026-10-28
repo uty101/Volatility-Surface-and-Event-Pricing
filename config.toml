@@ -31,6 +31,9 @@ stale_sessions = 5
 n_validate = 2000
 n_prod = 200
 
+[eep]
+min_vega_pt = 0.01
+
 [iv]
 iv_lo = 0.005
 iv_hi = 5.0
