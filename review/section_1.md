@@ -1265,3 +1265,281 @@ The last step commit reached `origin/main` at **2026-10-28 15:00:34 UTC** (push 
 ### 1b owner action
 
 Re-register the local task: `powershell -ExecutionPolicy Bypass -File scripts\windows\register_snapshot_task.ps1`. Until then the registered task still fires at 19:30 and 20:30 UTC with `--upload if-missing`, at the same instants as Actions.
+
+## Session 1d
+
+Instruction `instructions/01d_section_1_complete.md` (replaces 01c in full; no gate). Commits: `73f0064` step 1d.1, `b45e7b3` step 1d.2, `5cbc638` step 1d.3, `2c8d239` decisions record (`decisions/section_1_review.md`, `## Session 1d`; O-4, O-27, O-28 marked in `decisions/OPEN.md`).
+
+### 1d-D1. sha256 comparison (step 1d.1)
+
+The 4 assets were downloaded one by one with `gh release download snapshots-test --pattern <name>` into a scratch folder. Each download's sha256 is compared with the `sha256` map in `test_snaplog_2026-10-28.json` and with the release's own asset digest. The snaplog does not list itself, so its own check is against the release digest only.
+
+```
+asset                              sha256 of download                                               snaplog sha256 release digest
+test_chains_2026-10-28.parquet     03cbf2db2d1a3243b3892c15b290f60e1a7faac26a196af33f7332cdf9a5df9b match          match
+test_underlying_2026-10-28.csv     e87441f0c0af06b3bbad91a122c6e2354a500be9b83e7d4af3fda3135603d2c2 match          match
+test_earnings_2026-10-28.csv       a25342d37350389681eb6d2ba9c31fabf495eec37d70915a171bb2679390fba3 match          match
+test_snaplog_2026-10-28.json       f54ccd85439a16da60a9b437aa6d7876bc3fdee7694b9aa78e0223936fcebbbc not listed (the snaplog cannot hash itself) match
+```
+
+Snaplog run fields: `run_id` 40711619617, `runner` actions, `ny_start` 2026-10-28T11:00:58.638846-04:00, `in_window` false, `forced` true, `release_tag` snapshots-test, `n_ok` 37, `n_partial` 0, `n_error` 0.
+
+### 1d-D2. Fixture row counts and timing check
+
+The fixture rows were filtered with pyarrow (`pc.is_in` on `ticker`) and written with `pq.write_table`, so the column types and the pandas metadata stay as served. Read back with pandas, the fixture `DataFrame.equals` the source rows for the 3 tickers, with identical dtypes. The 2 CSVs were filtered line by line, with the served bytes of each kept line and the header copied unchanged (LF, as served).
+
+| file | `^SPX` | SPY | AAPL |
+|---|---|---|---|
+| `chains_sample.parquet` | 11,557 | 7,466 | 1,856 |
+| `underlying_sample.csv` | 1 | 1 | 1 |
+| `earnings_sample.csv` | 0 | 0 | 25 |
+
+Timing check numbers, with S from `underlying_sample.csv` (`^SPX` 7730.430176, SPY 770.375, AAPL 345.480011) and k = ln(K / S). They match the reviewer's table in instruction 01d, part A. The test asserts the `^SPX` share within abs(k) ≤ 0.10 is above 0.90:
+
+```
+fixture equals source rows (dtypes and values): True True
+ticker   rows  bid>0 all  n |k|<=0.10  bid>0 |k|<=0.10
+^SPX    11557     0.9451         8170           0.9820
+SPY      7466     0.9143         3779           0.9815
+AAPL     1856     0.8518          440           0.9909
+```
+
+### 1d-D3. `clean_log_fixture.csv` (step 1d.2)
+
+`clean_chain` on the fixture with `config.toml`, written with `%.10g`, LF, UTF-8, no index. `test_clean_log_fixture_reproduced` rebuilds it and compares bytes.
+
+```
+day,ticker,rule,rows_before,rows_dropped,note
+2026-10-28,^SPX,a,11557,634,
+2026-10-28,^SPX,b,10923,0,
+2026-10-28,^SPX,c,10923,0,
+2026-10-28,^SPX,d,10923,256,
+2026-10-28,^SPX,e,10667,0,deferred to section 3
+2026-10-28,SPY,a,7466,640,
+2026-10-28,SPY,b,6826,1,
+2026-10-28,SPY,c,6825,476,
+2026-10-28,SPY,d,6349,6,
+2026-10-28,SPY,e,6343,361,
+2026-10-28,AAPL,a,1856,275,
+2026-10-28,AAPL,b,1581,2,
+2026-10-28,AAPL,c,1579,96,
+2026-10-28,AAPL,d,1483,195,
+2026-10-28,AAPL,e,1288,162,
+```
+
+Share of rows surviving rules a to e per ticker:
+
+| ticker | rows | kept | share |
+|---|---|---|---|
+| `^SPX` | 11,557 | 10,667 | 0.9230 |
+| `SPY` | 7,466 | 5,982 | 0.8012 |
+| `AAPL` | 1,856 | 1,126 | 0.6067 |
+
+`^SPX` rule e is skipped under O-23 (b), so its share is before the European bounds. Of the kept rows, `stale` flags 2,400 (`^SPX`), 1,184 (SPY) and 90 (AAPL), and `after_close` flags none (the snapshot was taken at about 11:00 New York).
+
+Step 1d.2 item 3, run as the instruction expects. Both outputs stay header-only and are unchanged in git:
+
+```
+$ .venv/Scripts/python scripts/pull_snapshots.py
+release snapshots does not exist; wrote header-only snapshot_manifest.csv
+exit=0
+$ .venv/Scripts/python scripts/run_all.py --stage capture_health
+Empty DataFrame
+Columns: [session, runner, start_ny, ny_start, minutes_after_1530, tickers_ok, rows, after_close_rows, gap]
+Index: []
+capture_health: wrote C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\outputs\tables\capture_health.csv
+exit=0
+2026-10-28T15:36:12Z
+```
+
+### 1d-D4. The 4 `last_completed_session` tests (step 1d.3)
+
+```
+tests/test_data.py::test_last_completed_session_during_session PASSED    [ 25%]
+tests/test_data.py::test_last_completed_session_after_close PASSED       [ 50%]
+tests/test_data.py::test_last_completed_session_early_close PASSED       [ 75%]
+tests/test_data.py::test_last_completed_session_holiday PASSED           [100%]
+================ 4 passed, 17 deselected, 5 warnings in 1.58s =================
+```
+
+The code change (`volsurf/data.py` and `scripts/pull_data.py`):
+
+```diff
+diff --git a/scripts/pull_data.py b/scripts/pull_data.py
+index 677baee..959e38d 100644
+--- a/scripts/pull_data.py
++++ b/scripts/pull_data.py
+@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT))
+ 
+ from volsurf.config import load_config
++from volsurf.data import last_completed_session
+ from volsurf.snapshots import NY
+ 
+ RAW = ROOT / "data" / "raw"
+@@ -145,7 +146,8 @@ def file_entry(path: Path, url: str, stage: str, pulled_utc: str) -> dict:
+             "first_date": first, "last_date": last, "sha256": sha256(path)}
+ 
+ 
+-def write_manifest(stage: str, entries: dict[str, dict], pulled_utc: str, raw_root: Path = RAW) -> None:
++def write_manifest(stage: str, entries: dict[str, dict], pulled_utc: str, raw_root: Path = RAW,
++                   extra: dict | None = None) -> None:
+     """Replace this stage's entries in MANIFEST.json, keeping the other stages'."""
+     path = raw_root / "MANIFEST.json"
+     manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"stages": {}, "files": {}}
+@@ -154,6 +156,7 @@ def write_manifest(stage: str, entries: dict[str, dict], pulled_utc: str, raw_ro
+     manifest["stages"][stage] = {
+         "pulled_utc": pulled_utc,
+         "versions": {"python": platform.python_version(), **{lib: version(lib) for lib in LIBS}},
++        **(extra or {}),
+     }
+     manifest["files"] = dict(sorted(manifest["files"].items()))
+     manifest["stages"] = dict(sorted(manifest["stages"].items()))
+@@ -203,24 +206,25 @@ def stage_fred(session, pull_date: date, raw_root: Path = RAW) -> dict[str, dict
+     return entries
+ 
+ 
+-def history(ticker_factory, ticker: str, pull_date: date) -> pd.DataFrame:
+-    end = (pull_date + timedelta(days=1)).isoformat()  # yfinance end is exclusive
++def history(ticker_factory, ticker: str, last_session: date) -> pd.DataFrame:
++    end = (last_session + timedelta(days=1)).isoformat()  # yfinance end is exclusive
+     hist = ticker_factory(ticker).history(start=PRICES_START, end=end, auto_adjust=False, actions=True)
+     if hist is None or hist.empty:
+         raise RuntimeError(f"yfinance returned no history for {ticker}")
+     return hist
+ 
+ 
+-def stage_prices(ticker_factory, pull_date: date, cfg, raw_root: Path = RAW) -> dict[str, dict]:
++def stage_prices(ticker_factory, last_session: date, cfg, raw_root: Path = RAW) -> dict[str, dict]:
++    """Yahoo histories up to and including last_session, the last completed XNYS session (instruction 01c, 1c.3)."""
+     out_dir = raw_root / "prices"
+     out_dir.mkdir(parents=True, exist_ok=True)
+     pulled = datetime.now(UTC).isoformat()
+     uni = cfg.universe
+     captured = list(uni.etfs) + list(uni.xlk_holdings) + list(uni.singles)  # every captured ticker but ^SPX
+-    hist = {t: history(ticker_factory, t, pull_date) for t in captured}
+-    index_hist = {t: history(ticker_factory, t, pull_date) for t in INDEX_TICKERS}
+-    sector_hist = {t: history(ticker_factory, t, pull_date) for t in uni.sector_spdrs}
+-    url = f"yfinance Ticker(t).history(start={PRICES_START}, end={pull_date + timedelta(days=1)}, " \
++    hist = {t: history(ticker_factory, t, last_session) for t in captured}
++    index_hist = {t: history(ticker_factory, t, last_session) for t in INDEX_TICKERS}
++    sector_hist = {t: history(ticker_factory, t, last_session) for t in uni.sector_spdrs}
++    url = f"yfinance Ticker(t).history(start={PRICES_START}, end={last_session + timedelta(days=1)}, " \
+           "auto_adjust=False, actions=True)"
+     files = {
+         "close.parquet": history_frames(hist, "Close"),
+@@ -233,7 +237,7 @@ def stage_prices(ticker_factory, pull_date: date, cfg, raw_root: Path = RAW) ->
+         entries[f"prices/{name}"] = file_entry(out_dir / name, url, "prices", pulled)
+     dividends_frame(hist).to_csv(out_dir / "dividends.csv", **CSV)
+     entries["prices/dividends.csv"] = file_entry(out_dir / "dividends.csv", url, "prices", pulled)
+-    write_manifest("prices", entries, pulled, raw_root)
++    write_manifest("prices", entries, pulled, raw_root, extra={"last_session": last_session.isoformat()})
+     return entries
+ 
+ 
+@@ -262,12 +266,13 @@ def main(argv: list[str] | None = None) -> int:
+     import yfinance as yf
+ 
+     cfg = load_config()
+-    pull_date = datetime.now(UTC).astimezone(NY).date()
++    now = datetime.now(UTC)
++    pull_date = now.astimezone(NY).date()
+     session = requests.Session()
+     stages = ["cboe", "fred", "prices", "ssga"] if args.stage == "all" else [args.stage]
+     for stage in stages:
+         if stage == "prices":
+-            entries = stage_prices(yf.Ticker, pull_date, cfg)
++            entries = stage_prices(yf.Ticker, last_completed_session(now), cfg)
+         else:
+             entries = {"cboe": stage_cboe, "fred": stage_fred, "ssga": stage_ssga}[stage](session, pull_date)
+         for name, e in entries.items():
+diff --git a/volsurf/data.py b/volsurf/data.py
+index 2c3fd4a..7598f47 100644
+--- a/volsurf/data.py
++++ b/volsurf/data.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+ 
+ import json
+ from collections.abc import Callable
+-from datetime import date, time, timedelta
++from datetime import date, datetime, time, timedelta
+ from pathlib import Path
+ 
+ import numpy as np
+@@ -51,6 +51,13 @@ def sessions_between(t: date, e: date) -> int:
+     return len(_xnys().sessions_in_range(pd.Timestamp(t + timedelta(days=1)), pd.Timestamp(e)))
+ 
+ 
++def last_completed_session(now_utc: datetime) -> date:
++    """The latest XNYS session whose close (early closes included) is at or before now_utc (instruction 01c, 1c.3)."""
++    now = pd.Timestamp(now_utc).tz_convert("UTC")
++    closes = _xnys().closes.loc[: now.tz_localize(None).normalize()]
++    return closes[closes <= now].index[-1].date()
++
++
+ def _american_in_bounds(mid: pd.Series, kind: pd.Series, strike: pd.Series, spot: pd.Series) -> pd.Series:
+     """Section 5.3 American bounds: call in [max(S - K, 0), S), put in [max(K - S, 0), K)."""
+     call = (mid >= np.maximum(spot - strike, 0.0)) & (mid < spot)
+```
+
+`stage_prices` now takes the last completed session instead of the pull date, and `main` passes `last_completed_session(datetime.now(UTC))`. The prices stage entry in `MANIFEST.json` gets `last_session`, checked in `test_pull_uses_fake_session`. Per item 4, the pulls were not rerun, so the committed `MANIFEST.json` has no `last_session` yet; it appears on the next prices pull. The cboe, fred and ssga stages still date their files by the New York pull date.
+
+### 1d-D5. Tests, fresh clone, CI
+
+`pytest -p socket --disable-socket -q` on Windows at `2c8d239`:
+
+```
+.................................................                        [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:894
+  C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Lib\site-packages\_pytest\config\__init__.py:894: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; socket
+    self.import_plugin(arg, consider_entry_points=True)
+
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+  C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Lib\site-packages\pandas\core\series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+49 passed, 5 warnings in 4.03s
+```
+
+`ruff check .`: `All checks passed!`
+
+Fresh clone of `origin/main` at `2c8d239`:
+
+```
+$ git clone https://github.com/uty101/Volatility-Surface-and-Event-Pricing vs1d
+$ git log --oneline -1
+2c8d239 section 1d: review decisions recorded
+$ uv venv --python 3.12
+$ uv pip install -r requirements-lock.txt
+$ uv pip install -e . --no-deps
+$ .venv/Scripts/pytest -p socket --disable-socket -q
+.................................................                        [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:894
+  C:\Users\astha\AppData\Local\Temp\vs1d\.venv\Lib\site-packages\_pytest\config\__init__.py:894: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; socket
+    self.import_plugin(arg, consider_entry_points=True)
+
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+  C:\Users\astha\AppData\Local\Temp\vs1d\.venv\Lib\site-packages\pandas\core\series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+49 passed, 5 warnings in 17.56s
+exit=0
+```
+
+CI: success on `2c8d239` (run 40717868219), the commit carrying all 3 steps and the decisions record. This review and the status file go in 1 final commit pushed after it; that commit cannot carry its own CI result.
+
+### 1d deviations
+
+- PLAN 1.1 still says the prices stage runs "to the pull date inclusive", and PLAN 8.2 still marks where BXM alone is reported as **OPEN O-28**. Instruction 01d beats PLAN.md (rule 13) but does not allow staging it, so PLAN.md is unchanged.
