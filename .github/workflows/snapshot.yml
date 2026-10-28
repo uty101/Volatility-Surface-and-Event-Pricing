@@ -40,7 +40,7 @@ jobs:
           FORCE=""
           if [ "$EVENT" = "push" ]; then FORCE="--force"; fi
           if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" = "true" ]; then FORCE="--force"; fi
-          .venv/bin/python scripts/snapshot.py $FORCE --runner actions --out snap --upload always
+          .venv/bin/python scripts/snapshot.py $FORCE --runner actions --out snap --upload better
       - uses: actions/upload-artifact@v4
         if: always()
         with:

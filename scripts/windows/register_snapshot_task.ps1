@@ -1,6 +1,6 @@
 # Registers the backup capture task volsurf-snapshot (kickoff Section 9, step 0.2).
 # Monday to Friday at each [snapshot] local_task_times_london time, runs the repo venv's Python on
-# scripts/snapshot.py --runner local --out data/local_capture --upload if-missing.
+# scripts/snapshot.py --runner local --out data/local_capture --upload better.
 # Runs only while the user is logged on; starts when available after a missed time.
 $ErrorActionPreference = "Stop"
 
@@ -25,7 +25,7 @@ if (-not $times) { throw "Could not read [snapshot] local_task_times_london from
 $days = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
 $triggers = @($times | ForEach-Object { New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $_ })
 $action = New-ScheduledTaskAction -Execute "`"$python`"" `
-    -Argument "scripts\snapshot.py --runner local --out data\local_capture --upload if-missing" `
+    -Argument "scripts\snapshot.py --runner local --out data\local_capture --upload better" `
     -WorkingDirectory $repo
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive

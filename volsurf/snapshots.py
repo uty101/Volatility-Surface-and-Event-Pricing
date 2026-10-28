@@ -119,6 +119,11 @@ def earnings_frame(raw: pd.DataFrame, ticker: str, snap_date: date) -> pd.DataFr
     return out[EARNINGS_COLUMNS]
 
 
+def should_upload(existing_n_ok: int | None, new_n_ok: int) -> bool:
+    """Upload rule `better` (instruction 01, step 1.0): no asset yet, or strictly more tickers ok; a tie keeps the release."""
+    return existing_n_ok is None or new_n_ok > existing_n_ok
+
+
 def snapshot_log(rows: list[dict]) -> dict:
     """Per-ticker status rows -> the per-ticker part of SNAPLOG with status counts."""
     counts = {s: sum(r["status"] == s for r in rows) for s in ("ok", "partial", "error")}

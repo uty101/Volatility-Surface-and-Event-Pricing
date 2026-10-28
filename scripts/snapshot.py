@@ -14,6 +14,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from datetime import UTC, datetime
@@ -34,6 +35,7 @@ from volsurf.snapshots import (
     in_window,
     is_session,
     keep_spxw,
+    should_upload,
     snapshot_log,
 )
 
@@ -139,17 +141,35 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["gh", *args], cwd=ROOT, capture_output=True, text=True, check=False)
 
 
-def upload(files: list[Path], tag: str, chains_name: str, mode: str) -> str:
+def asset_names(tag: str) -> list[str]:
+    names = gh("release", "view", tag, "--json", "assets", "--jq", ".assets[].name")
+    if names.returncode != 0:
+        raise RuntimeError(f"gh release view failed: {names.stderr.strip()}")
+    return names.stdout.split()
+
+
+def existing_n_ok(tag: str, snaplog_name: str) -> int | None:
+    """n_ok of the release's snaplog for this date, or None when the release has no such asset."""
+    if snaplog_name not in asset_names(tag):
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        got = gh("release", "download", tag, "--pattern", snaplog_name, "--dir", tmp, "--clobber")
+        if got.returncode != 0:
+            raise RuntimeError(f"gh release download {snaplog_name} failed: {got.stderr.strip()}")
+        return int(json.loads((Path(tmp) / snaplog_name).read_text(encoding="utf-8"))["n_ok"])
+
+
+def upload(files: list[Path], tag: str, chains_name: str, snaplog_name: str, mode: str, n_ok: int) -> str:
     if gh("release", "view", tag).returncode != 0:
         made = gh("release", "create", tag, "--title", tag, "--notes", "daily option chain snapshots")
         if made.returncode != 0 and gh("release", "view", tag).returncode != 0:
             raise RuntimeError(f"gh release create failed: {made.stderr.strip()}")
-    if mode == "if-missing":
-        names = gh("release", "view", tag, "--json", "assets", "--jq", ".assets[].name")
-        if names.returncode != 0:
-            raise RuntimeError(f"gh release view failed: {names.stderr.strip()}")
-        if chains_name in names.stdout.split():
-            return f"skipped: {chains_name} already in release {tag}"
+    if mode == "if-missing" and chains_name in asset_names(tag):
+        return f"skipped: {chains_name} already in release {tag}"
+    if mode == "better":
+        existing = existing_n_ok(tag, snaplog_name)
+        if not should_upload(existing, n_ok):
+            return f"skipped: existing n_ok={existing} >= new n_ok={n_ok}"
     done = gh("release", "upload", tag, *[str(f) for f in files], "--clobber")
     if done.returncode != 0:
         raise RuntimeError(f"gh release upload failed: {done.stderr.strip()}")
@@ -167,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force", action="store_true")
     p.add_argument("--runner", choices=["actions", "local"], required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--upload", choices=["always", "if-missing", "never"], required=True)
+    p.add_argument("--upload", choices=["always", "if-missing", "better", "never"], required=True)
     args = p.parse_args(argv)
 
     with open(ROOT / "config.toml", "rb") as fh:
@@ -244,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     code = 0 if summary["n_ok"] >= snap["min_tickers_ok"] else 1
     if args.upload != "never":
         try:
-            append_log(out, upload(list(files.values()), tag, files["chains"].name, args.upload))
+            append_log(out, upload(list(files.values()), tag, files["chains"].name, files["snaplog"].name,
+                                   args.upload, summary["n_ok"]))
         except Exception as exc:  # noqa: BLE001 - recorded, capture continues
             append_log(out, f"upload failed: {describe(exc)}")
             code = code or 2

@@ -13,6 +13,7 @@ from volsurf.snapshots import (
     in_window,
     is_session,
     keep_spxw,
+    should_upload,
 )
 
 CFG = tomllib.loads((Path(__file__).resolve().parents[1] / "config.toml").read_text(encoding="utf-8"))
@@ -71,3 +72,19 @@ def test_chain_frame_column_order():
     assert list(out.columns) == CHAINS_COLUMNS
     assert out["kind"].tolist() == ["C", "C", "P"]
     assert (out["ticker"] == "AAPL").all() and (out["expiry"] == "2026-11-20").all()
+
+
+def test_should_upload_no_existing_asset():
+    assert should_upload(None, 0)
+
+
+def test_should_upload_more_tickers_ok():
+    assert should_upload(30, 31)
+
+
+def test_should_upload_tie_keeps_existing():
+    assert not should_upload(31, 31)
+
+
+def test_should_upload_fewer_tickers_ok():
+    assert not should_upload(32, 10)
