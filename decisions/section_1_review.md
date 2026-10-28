@@ -28,3 +28,14 @@ One line per OPEN item: the option chosen and the reviewer's reason. Options are
 - **O-24** (a). No reason given.
 
 Also decided in instruction 01 part A: status question 1 of session 0 (local task triggers pinned to UTC) is (a), keep the UTC triggers, since they fire at the same instants as the Actions crons. The owner re-registers the task by hand after step 1.0.
+
+## Session 1b
+
+Decisions from the session 1 review (instruction 01b, part B).
+
+- **Status 1** (re-register the task). The owner re-registers once, after session 1b, so the task gets the new times and `better` together. Saves a second re-registration.
+- **Status 4** (PUT and BXM history). Research question 4 is restated (step 1b.3). The VIX and realised variance study and the GARCH signal still run from 1990. The 4 strategy backtests run on a common window from 2007-01-31, month end to month end. BXM is also reported alone from 2002-03-28, as a longer descriptive series. 236 months that include 2008, 2020 and 2022 are enough to judge a short volatility strategy; scattered points before 2007 cannot be turned into monthly returns.
+- **Status 5** (XLK futures line). Accept as is. Only captured names enter the implied correlation, renormalised, so a 0.0003% futures line never enters any calculation.
+- **Status 6** (small interpretations). All accepted as implemented. Each matches the spec's intent.
+- **O-25** (a), a trailing `note` column. No reason given.
+- **O-26** (a), keep both. No reason given.

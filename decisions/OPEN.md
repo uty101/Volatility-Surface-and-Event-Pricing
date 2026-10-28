@@ -90,8 +90,10 @@ Items are appended as they are found. Each has 2 concrete options; the reviewer 
 ## Found in session 1
 
 **O-25 Where the `^SPX` rule e note goes in CLEAN_LOG (1.3).** Instruction 01 says rule e for `^SPX` is logged with the note `deferred to section 3`, but the CLEAN_LOG schema (CLAUDE.md Section 6.2) has no note column. (a) A trailing `note` column after the 5 schema columns, blank on every other row. (b) Keep the 5 schema columns and write the note into `rule` as `e (deferred to section 3)`. Implemented as (a) so that step 1.3 could be built; the reviewer may switch it.
+*Decided in instruction 01b: (a). See `decisions/section_1_review.md`.*
 
 **O-26 `start_ny` and `ny_start` in the capture health table (1.4).** PLAN 1.4 names a column `start_ny`; instruction 01 adds a column `ny_start`. Both describe the run's New York start. (a) Keep both: `start_ny` is the New York wall time `HH:MM:SS`, `ny_start` is SNAPLOG's full ISO timestamp with offset. (b) Keep one column only. Implemented as (a); the reviewer may switch it.
+*Decided in instruction 01b: (a). See `decisions/section_1_review.md`.*
 
 ## Found in session 1b
 
