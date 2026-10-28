@@ -2,7 +2,9 @@
 
 Read `CLAUDE.md`, `PLAN.md` and `instructions/00_kickoff.md` first. This file beats all three where they differ (rule 13).
 
-**Do not start this session until the 2026-10-28 scheduled capture has uploaded `chains_2026-10-28.parquet` to the `snapshots` release.** If it is not there, stop before step 1.0 and say so in the status file.
+**This session runs before the first real capture.** The fixture day 2026-10-28 is captured at 19:30 UTC today. Everything in this session that needs that day's files (the fixture in step 1.2, and the real-data evidence in step 1.4) moves to `instructions/01b_section_1_fixture.md`, which runs after the capture. Do not write tests that read fixture files in this session, and do not create placeholder fixtures. Every other part of Section 1 is built now.
+
+**Push step 1.0 before 19:15 UTC** so tonight's scheduled capture already uses the `better` upload rule. If the session is still running at 19:15 UTC, push what is committed at that point (steps already complete and tested) and carry on.
 
 ---
 
@@ -17,7 +19,7 @@ Approved. What the reviewer checked independently, on Linux, from a fresh clone 
 
 **Correction to status item 4.** It is not true that every upcoming earnings date carries a 15:00 placeholder. In the test asset, confirmed dates carry their real time (MSFT 2026-10-28 16:00, classified AMC), and every past date carries a real time (16:00 appears 392 times, 06:00 155 times, 07:00 56 times). The 15:00 placeholder appears only on projected dates that the company has not yet confirmed (for example TSLA 2027-01-27), 14 rows in all. That decides O-12 below.
 
-**Owner action, not yours:** the local backup task is not registered. The owner runs the registration command from the status file by hand.
+**Local task:** registered after review (commit `1ff108e`) with `--upload if-missing` and triggers at 19:30 and 20:30 UTC. Status question 1 is decided as (a): keep the UTC triggers, since they fire at the same instants as the Actions crons and so stay at 15:30 New York through every clock change. After step 1.0 changes the script to `--upload better`, the owner re-registers the task by hand.
 
 ---
 
@@ -85,7 +87,9 @@ The push triggers a forced Actions run to `snapshots-test`. It uploads if `snaps
 
 ### Step 1.2: snapshot download and fixture (PLAN 1.2)
 
-As in PLAN.md. The fixture day is 2026-10-28 (O-4). The fixture files are `tests/fixtures/chains_sample.parquet` (rows for `^SPX`, SPY and AAPL), `tests/fixtures/underlying_sample.csv` and `tests/fixtures/earnings_sample.csv` (same 3 tickers where present). Add a test that the fixture's `^SPX` rows all start with `SPXW` and that more than 50% of fixture `^SPX` rows have bid > 0. That last test is the check that the 15:30 timing works.
+Build `scripts/pull_snapshots.py` as in PLAN.md and run it. The `snapshots` release may not exist yet or may hold no assets; the script must handle both (write the manifest with a header only, exit 0, print a one-line message). Test it with a fake `gh` runner: 0 assets, 2 assets of which 1 is already present with a matching sha256 (skipped), and 1 present with a wrong sha256 (downloaded again).
+
+The fixture itself is **not** built in this session. For the record, instruction 01b will ask for: fixture day 2026-10-28 (O-4); `tests/fixtures/chains_sample.parquet` (rows for `^SPX`, SPY and AAPL), `tests/fixtures/underlying_sample.csv` and `tests/fixtures/earnings_sample.csv`; a test that the fixture's `^SPX` rows all start with `SPXW`; and a test that more than 50% of fixture `^SPX` rows have bid > 0, which is the check that the 15:30 timing works.
 
 ### Step 1.3: loader and cleaning (PLAN 1.3)
 
@@ -99,7 +103,7 @@ As in PLAN.md, with:
 
 ### Step 1.4: capture health (PLAN 1.4)
 
-As in PLAN.md, from every session from 2026-10-28 to the last downloaded day. Add a column `ny_start` and a column `minutes_after_1530` (start time minus 15:30 New York, in minutes). Review evidence: the full table, the CLEAN_LOG for the fixture day (all 3 tickers, every rule), and per fixture ticker the share of rows surviving cleaning.
+Build the capture health builder as in PLAN.md, with 2 extra columns: `ny_start` and `minutes_after_1530` (start time minus 15:30 New York, in minutes). Test it on synthetic SNAPLOG dicts: 1 normal day, 1 day with 2 tickers in error, and 1 session with no asset (a gap). Run it on whatever `data/snapshots/` holds now; an empty table with headers only is the expected result today. The real table and the fixture-day CLEAN_LOG come in instruction 01b.
 
 ---
 
@@ -108,8 +112,9 @@ As in PLAN.md, from every session from 2026-10-28 to the last downloaded day. Ad
 1. Step 1.0: the 4 new tests passing and the last 3 lines of the forced Actions run log after the push.
 2. The `MANIFEST.json` contents, plus first and last 3 rows of every committed raw file.
 3. The parsed XLK holdings CSV in full and its weight sum.
-4. `data/raw/snapshot_manifest.csv` in full.
-5. The capture health table and the CLEAN_LOG described in 1.4.
-6. The fresh-clone check (rule 12) and CI status of the final commit.
+4. `data/raw/snapshot_manifest.csv` in full (header only is expected).
+5. The synthetic capture health test output.
+6. For each cleaning rule a to e, the synthetic input rows and which were dropped.
+7. The fresh-clone check (rule 12), CI status of the final commit, and the time (UTC) step 1.0 reached `origin/main`.
 
 Status file: `instructions/01_section_1.status.md`.
