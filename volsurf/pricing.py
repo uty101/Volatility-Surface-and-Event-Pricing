@@ -1,9 +1,26 @@
-"""BSM, Black-76, the CRR tree and the early exercise premium (PLAN 2.1, kickoff Section 5.1)."""
+"""BSM, Black-76, the CRR tree and the early exercise premium (PLAN 2.1, kickoff Section 5.1), and the early
+exercise premium table (PLAN 2.3, instruction 02 step 2.3)."""
 
 from __future__ import annotations
 
+from datetime import date, time
+
 import numpy as np
+import pandas as pd
+from scipy.optimize import brentq
 from scipy.stats import norm
+
+from volsurf.data import dividend_yield, rate_curve
+from volsurf.snapshots import NY
+
+EEP_ROW_COLUMNS = [
+    "ticker", "expiry", "kind", "strike", "contract_symbol", "snap_utc", "bid", "ask", "mid", "S", "T", "r", "q",
+    "F", "k", "k_bin", "iv_american", "iv_european", "premium_vol_pts", "status",
+]
+EEP_SUMMARY_COLUMNS = ["ticker", "kind", "k_bin", "n", "median_vol_pts", "max_vol_pts"]
+# O-8 (a), decided in instruction 01: k = ln(K/F) bins, right-closed
+K_BIN_EDGES = [-np.inf, -0.10, -0.02, 0.02, 0.10, np.inf]
+K_BIN_LABELS = ["(-inf, -0.10]", "(-0.10, -0.02]", "(-0.02, 0.02]", "(0.02, 0.10]", "(0.10, inf)"]
 
 
 def _is_call(kind) -> np.ndarray:
@@ -73,3 +90,75 @@ def crr(S, K, T, r, q, sigma, kind, n, american) -> float:
 def early_exercise_premium(S, K, T, r, q, sigma, kind, n) -> float:
     """Section 5.1: CRR American minus CRR European at the same n."""
     return crr(S, K, T, r, q, sigma, kind, n, True) - crr(S, K, T, r, q, sigma, kind, n, False)
+
+
+def time_to_expiry(expiry: str, snap_utc, close_ny: time) -> float:
+    """Convention 4.1: (expiry at the New York close - snapshot time) / (365 x 86400 s)."""
+    end = pd.Timestamp.combine(date.fromisoformat(expiry), close_ny).tz_localize(NY)
+    return (end - pd.Timestamp(snap_utc)).total_seconds() / (365 * 86400)  # Convention 4.1
+
+
+def _american_price(sigma, S, K, T, r, q, kind, n) -> float:
+    return crr(S, K, T, r, q, sigma, kind, n, True)
+
+
+def _european_price(sigma, S, K, T, r, q, kind) -> float:
+    return float(bsm(S, K, T, r, q, sigma, kind))
+
+
+def _implied_vol(price, args: tuple, mid: float, lo: float, hi: float) -> float:
+    """brentq on price(sigma, *args) - mid over [lo, hi] (O-24 (a)); nan when the bracket holds no root."""
+    try:
+        return brentq(lambda s: price(s, *args) - mid, lo, hi)
+    except ValueError:
+        return np.nan
+
+
+def eep_rows(clean: pd.DataFrame, underlying: pd.DataFrame, fred: dict[str, pd.DataFrame], divs: pd.DataFrame,
+             day: date, cfg) -> pd.DataFrame:
+    """Instruction 02 step 2.3, one row per clean contract of every American chain: the American IV (CRR at
+    n_prod) and the European IV (BSM) on the same mid, each by brentq on [iv_lo, iv_hi] (O-24 (a)), and the
+    premium (European IV - American IV) x 100 in vol points. S from UNDERLYING, r from rate_curve(day) at the
+    row's T, q from dividend_yield, T by Convention 4.1, F and k by Conventions 4.8 and 4.9. A failed solve keeps
+    the row with a status (O-29) and blank vols."""
+    close_ny = time.fromisoformat(cfg.snapshot.close_ny)
+    curve = rate_curve(fred, day)
+    lo, hi, n = cfg.iv.iv_lo, cfg.iv.iv_hi, cfg.pricing.n_prod
+    spot = underlying.set_index("ticker")["price"]
+    out = []
+    for ticker, chain in clean[~clean["ticker"].isin(cfg.universe.index)].groupby("ticker", sort=False):
+        S = float(spot[ticker])
+        q = dividend_yield(divs[divs["ticker"] == ticker], S, day)
+        for row in chain.itertuples(index=False):
+            K, kind = float(row.strike), row.kind
+            T = time_to_expiry(row.expiry, row.snap_utc, close_ny)
+            r = curve(T)
+            mid = (row.bid + row.ask) / 2  # Convention 4.3
+            F = S * np.exp((r - q) * T)  # Convention 4.8
+            iv_a = _implied_vol(_american_price, (S, K, T, r, q, kind, n), mid, lo, hi)
+            iv_e = _implied_vol(_european_price, (S, K, T, r, q, kind), mid, lo, hi)
+            fail_a, fail_e = np.isnan(iv_a), np.isnan(iv_e)
+            status = ("both_fail" if fail_a and fail_e else "american_fail" if fail_a
+                      else "european_fail" if fail_e else "ok")
+            if status != "ok":
+                iv_a = iv_e = np.nan
+            out.append({"ticker": ticker, "expiry": row.expiry, "kind": kind, "strike": K,
+                        "contract_symbol": row.contract_symbol, "snap_utc": row.snap_utc, "bid": row.bid,
+                        "ask": row.ask, "mid": mid, "S": S, "T": T, "r": r, "q": q, "F": F, "k": np.log(K / F),
+                        "iv_american": iv_a, "iv_european": iv_e, "premium_vol_pts": (iv_e - iv_a) * 100,
+                        "status": status})
+    rows = pd.DataFrame(out, columns=EEP_ROW_COLUMNS)
+    rows["k_bin"] = pd.cut(rows["k"], K_BIN_EDGES, labels=K_BIN_LABELS).astype(str)
+    return rows
+
+
+def eep_summary(rows: pd.DataFrame) -> pd.DataFrame:
+    """Median and max premium in vol points per (ticker, kind, k bin) over rows with status ok; tickers in row
+    order, kinds C then P, bins in k order."""
+    ok = rows[rows["status"] == "ok"]
+    summary = (ok.groupby(["ticker", "kind", "k_bin"], sort=False)["premium_vol_pts"]
+               .agg(n="size", median_vol_pts="median", max_vol_pts="max").reset_index())
+    tickers = {t: i for i, t in enumerate(pd.unique(rows["ticker"]))}
+    order = pd.DataFrame({"t": summary["ticker"].map(tickers), "kind": summary["kind"],
+                          "b": summary["k_bin"].map(K_BIN_LABELS.index)})
+    return summary.loc[order.sort_values(["t", "kind", "b"]).index, EEP_SUMMARY_COLUMNS].reset_index(drop=True)

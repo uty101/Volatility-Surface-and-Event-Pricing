@@ -103,3 +103,9 @@ Items are appended as they are found. Each has 2 concrete options; the reviewer 
 
 **O-28 Where BXM alone from `[vrp] bxm_start` is reported (8.2).** Instruction 01b says BXM is also reported alone from 2002-03-28 but names no output. (a) A row `bxm_long` in `outputs/tables/strategy_stats.csv` with the same statistics as the 4 strategies, computed from 2002-03-28, and a second line on `outputs/figures/vrp_cumulative.png`. (b) A separate table `outputs/tables/bxm_long.csv` (month_end, bxm) and its own statistics row file, leaving the 4-strategy outputs on the common window only. Nothing is built yet; Section 8 needs a decision.
 *Decided in instruction 01d: (a), a `bxm_long` row in `strategy_stats.csv` and a dashed line on `vrp_cumulative.png`, labelled as a separate window. See `decisions/section_1_review.md`.*
+
+## Found in session 2
+
+**O-29 EEP row status vocabulary (2.3).** Instruction 02 says rows where either solve fails "get a status and stay in the row table with blank vols", without naming the statuses or saying whether a one-sided failure blanks the vol that did solve. (a) `ok`, `american_fail`, `european_fail`, `both_fail`; on any failure both vols and the premium are blank. (b) `ok` and a single `solve_fail`; the vol that solved is kept and only the premium is blank. Implemented as (a) so that step 2.3 could be built; the reviewer may switch it.
+
+**O-30 The per-underlying total row of `book_greeks` (2.2).** Instruction 02 asks for 1 total row per underlying but does not say how it is marked. (a) The total row carries `expiry = total` and follows that underlying's expiry rows; columns underlying, expiry, delta, gamma, vega, theta, rho, vanna, volga, in code units (Convention 4.10) × quantity × 100. (b) Blank `expiry` on the total row plus a `level` column (`expiry` or `underlying`). Implemented as (a); the reviewer may switch it.
