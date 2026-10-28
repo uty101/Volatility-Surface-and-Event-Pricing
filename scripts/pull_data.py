@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from volsurf.config import load_config
+from volsurf.data import last_completed_session
 from volsurf.snapshots import NY
 
 RAW = ROOT / "data" / "raw"
@@ -145,7 +146,8 @@ def file_entry(path: Path, url: str, stage: str, pulled_utc: str) -> dict:
             "first_date": first, "last_date": last, "sha256": sha256(path)}
 
 
-def write_manifest(stage: str, entries: dict[str, dict], pulled_utc: str, raw_root: Path = RAW) -> None:
+def write_manifest(stage: str, entries: dict[str, dict], pulled_utc: str, raw_root: Path = RAW,
+                   extra: dict | None = None) -> None:
     """Replace this stage's entries in MANIFEST.json, keeping the other stages'."""
     path = raw_root / "MANIFEST.json"
     manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"stages": {}, "files": {}}
@@ -154,6 +156,7 @@ def write_manifest(stage: str, entries: dict[str, dict], pulled_utc: str, raw_ro
     manifest["stages"][stage] = {
         "pulled_utc": pulled_utc,
         "versions": {"python": platform.python_version(), **{lib: version(lib) for lib in LIBS}},
+        **(extra or {}),
     }
     manifest["files"] = dict(sorted(manifest["files"].items()))
     manifest["stages"] = dict(sorted(manifest["stages"].items()))
@@ -203,24 +206,25 @@ def stage_fred(session, pull_date: date, raw_root: Path = RAW) -> dict[str, dict
     return entries
 
 
-def history(ticker_factory, ticker: str, pull_date: date) -> pd.DataFrame:
-    end = (pull_date + timedelta(days=1)).isoformat()  # yfinance end is exclusive
+def history(ticker_factory, ticker: str, last_session: date) -> pd.DataFrame:
+    end = (last_session + timedelta(days=1)).isoformat()  # yfinance end is exclusive
     hist = ticker_factory(ticker).history(start=PRICES_START, end=end, auto_adjust=False, actions=True)
     if hist is None or hist.empty:
         raise RuntimeError(f"yfinance returned no history for {ticker}")
     return hist
 
 
-def stage_prices(ticker_factory, pull_date: date, cfg, raw_root: Path = RAW) -> dict[str, dict]:
+def stage_prices(ticker_factory, last_session: date, cfg, raw_root: Path = RAW) -> dict[str, dict]:
+    """Yahoo histories up to and including last_session, the last completed XNYS session (instruction 01c, 1c.3)."""
     out_dir = raw_root / "prices"
     out_dir.mkdir(parents=True, exist_ok=True)
     pulled = datetime.now(UTC).isoformat()
     uni = cfg.universe
     captured = list(uni.etfs) + list(uni.xlk_holdings) + list(uni.singles)  # every captured ticker but ^SPX
-    hist = {t: history(ticker_factory, t, pull_date) for t in captured}
-    index_hist = {t: history(ticker_factory, t, pull_date) for t in INDEX_TICKERS}
-    sector_hist = {t: history(ticker_factory, t, pull_date) for t in uni.sector_spdrs}
-    url = f"yfinance Ticker(t).history(start={PRICES_START}, end={pull_date + timedelta(days=1)}, " \
+    hist = {t: history(ticker_factory, t, last_session) for t in captured}
+    index_hist = {t: history(ticker_factory, t, last_session) for t in INDEX_TICKERS}
+    sector_hist = {t: history(ticker_factory, t, last_session) for t in uni.sector_spdrs}
+    url = f"yfinance Ticker(t).history(start={PRICES_START}, end={last_session + timedelta(days=1)}, " \
           "auto_adjust=False, actions=True)"
     files = {
         "close.parquet": history_frames(hist, "Close"),
@@ -233,7 +237,7 @@ def stage_prices(ticker_factory, pull_date: date, cfg, raw_root: Path = RAW) -> 
         entries[f"prices/{name}"] = file_entry(out_dir / name, url, "prices", pulled)
     dividends_frame(hist).to_csv(out_dir / "dividends.csv", **CSV)
     entries["prices/dividends.csv"] = file_entry(out_dir / "dividends.csv", url, "prices", pulled)
-    write_manifest("prices", entries, pulled, raw_root)
+    write_manifest("prices", entries, pulled, raw_root, extra={"last_session": last_session.isoformat()})
     return entries
 
 
@@ -262,12 +266,13 @@ def main(argv: list[str] | None = None) -> int:
     import yfinance as yf
 
     cfg = load_config()
-    pull_date = datetime.now(UTC).astimezone(NY).date()
+    now = datetime.now(UTC)
+    pull_date = now.astimezone(NY).date()
     session = requests.Session()
     stages = ["cboe", "fred", "prices", "ssga"] if args.stage == "all" else [args.stage]
     for stage in stages:
         if stage == "prices":
-            entries = stage_prices(yf.Ticker, pull_date, cfg)
+            entries = stage_prices(yf.Ticker, last_completed_session(now), cfg)
         else:
             entries = {"cboe": stage_cboe, "fred": stage_fred, "ssga": stage_ssga}[stage](session, pull_date)
         for name, e in entries.items():

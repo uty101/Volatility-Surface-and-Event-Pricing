@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +11,7 @@ from volsurf.data import (
     CLEAN_LOG_COLUMNS,
     clean_chain,
     dividend_yield,
+    last_completed_session,
     load_snapshot,
     rate_curve,
     sessions_between,
@@ -177,6 +178,22 @@ def test_dividend_yield_window():
 def test_sessions_between_thanksgiving():
     assert sessions_between(date(2026, 11, 25), date(2026, 11, 30)) == 2  # 11-26 closed, 11-27 early close
     assert sessions_between(date(2026, 12, 24), date(2026, 12, 28)) == 1  # 12-25 closed
+
+
+def test_last_completed_session_during_session():
+    assert last_completed_session(datetime(2026, 10, 28, 14, 56, tzinfo=UTC)) == date(2026, 10, 27)
+
+
+def test_last_completed_session_after_close():
+    assert last_completed_session(datetime(2026, 10, 28, 20, 1, tzinfo=UTC)) == date(2026, 10, 28)  # 16:00 NY
+
+
+def test_last_completed_session_early_close():
+    assert last_completed_session(datetime(2026, 11, 27, 18, 30, tzinfo=UTC)) == date(2026, 11, 27)  # 13:00 NY
+
+
+def test_last_completed_session_holiday():
+    assert last_completed_session(datetime(2026, 11, 26, 23, 0, tzinfo=UTC)) == date(2026, 11, 25)  # Thanksgiving
 
 
 def _write_day(root: Path, day: str, skip: str | None = None):

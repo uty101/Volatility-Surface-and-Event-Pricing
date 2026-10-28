@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +49,13 @@ def sessions_between(t: date, e: date) -> int:
     if e <= t:
         return 0
     return len(_xnys().sessions_in_range(pd.Timestamp(t + timedelta(days=1)), pd.Timestamp(e)))
+
+
+def last_completed_session(now_utc: datetime) -> date:
+    """The latest XNYS session whose close (early closes included) is at or before now_utc (instruction 01c, 1c.3)."""
+    now = pd.Timestamp(now_utc).tz_convert("UTC")
+    closes = _xnys().closes.loc[: now.tz_localize(None).normalize()]
+    return closes[closes <= now].index[-1].date()
 
 
 def _american_in_bounds(mid: pd.Series, kind: pd.Series, strike: pd.Series, spot: pd.Series) -> pd.Series:

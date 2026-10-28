@@ -104,7 +104,7 @@ def test_pull_uses_fake_session(tmp_path):
     pull_data.stage_cboe(session, pull, tmp_path)
     pull_data.stage_fred(session, pull, tmp_path)
     pull_data.stage_ssga(session, pull, tmp_path)
-    pull_data.stage_prices(_FakeTicker, pull, CFG, tmp_path)
+    pull_data.stage_prices(_FakeTicker, date(2026, 10, 28), CFG, tmp_path)
 
     assert sorted(session.urls) == sorted(pages)
     assert (tmp_path / "cboe" / "VIX.csv").read_bytes() == vix
@@ -120,5 +120,6 @@ def test_pull_uses_fake_session(tmp_path):
     assert len(divs) == 36 and (divs["date"] == "2026-10-27").all() and (divs["dividend"] == 0.25).all()
     manifest = json.loads((tmp_path / "MANIFEST.json").read_text())
     assert set(manifest["stages"]) == {"cboe", "fred", "prices", "ssga"}
+    assert manifest["stages"]["prices"]["last_session"] == "2026-10-28"
     for name, entry in manifest["files"].items():
         assert hashlib.sha256((tmp_path / name).read_bytes()).hexdigest() == entry["sha256"]
