@@ -427,3 +427,139 @@ Interpretations made while building, for the reviewer to confirm:
 4. `volsurf/pricing.py` (`eep_solve`)
 5. `volsurf/data.py` (`clean_chain`, rule e for `^SPX`)
 6. `outputs/tables/eep_summary.csv`, `outputs/tables/clean_log_fixture.csv`
+
+## Session 3c
+
+Instruction 03c: the capture waits for 15:30 New York. Step 3c.1 is commit `a96f353` (`step 3c.1: capture waits for 15:30 New York`). It touches only the files the instruction names: `config.toml` (`[snapshot] target_ny`, `cron_utc`), `volsurf/snapshots.py` (`seconds_until_target`, `already_captured`), `scripts/snapshot.py` (`--wait`), `.github/workflows/snapshot.yml` and `tests/test_snapshots.py`. No 03b work had started, so nothing else was in the working tree. The local task is unchanged.
+
+### 3c.1 test output
+
+`.venv/Scripts/pytest -p socket --disable-socket tests/test_snapshots.py -rA`:
+
+```
+PASSED tests/test_snapshots.py::test_in_window_across_clock_change
+PASSED tests/test_snapshots.py::test_is_session
+PASSED tests/test_snapshots.py::test_filter_expiries
+PASSED tests/test_snapshots.py::test_keep_spxw
+PASSED tests/test_snapshots.py::test_classify_timing
+PASSED tests/test_snapshots.py::test_chain_frame_column_order
+PASSED tests/test_snapshots.py::test_should_upload_no_existing_asset
+PASSED tests/test_snapshots.py::test_should_upload_more_tickers_ok
+PASSED tests/test_snapshots.py::test_should_upload_tie_keeps_existing
+PASSED tests/test_snapshots.py::test_should_upload_fewer_tickers_ok
+PASSED tests/test_snapshots.py::test_seconds_until_target
+PASSED tests/test_snapshots.py::test_already_captured
+======================= 12 passed, 5 warnings in 0.97s ========================
+```
+
+Full suite before the push: `4477 passed, 5 warnings in 106.37s (0:01:46)`. `ruff check .`: `All checks passed!`
+
+Smoke test of the real `--wait` path before the push. `scripts/snapshot.py`'s `wait_for_target` ran against GitHub at 15:05 UTC with `time.sleep` stubbed. Check (a) found no `snapshots` release, so `existing_n_ok` is None:
+
+```
+2026-10-29T15:05:38.859635+00:00 waiting 15861 seconds until 15:30 New York
+(stub sleep 15861)
+proceed to capture: True
+```
+
+### Diff of `snapshot.yml`
+
+```diff
+diff --git a/.github/workflows/snapshot.yml b/.github/workflows/snapshot.yml
+index 670b629..a5f1f5d 100644
+--- a/.github/workflows/snapshot.yml
++++ b/.github/workflows/snapshot.yml
+@@ -2,8 +2,9 @@ name: snapshot
+ 
+ on:
+   schedule:
+-    - cron: "30 19 * * 1-5"
+-    - cron: "30 20 * * 1-5"
++    - cron: "17 15 * * 1-5"
++    - cron: "17 17 * * 1-5"
++    - cron: "47 18 * * 1-5"
+   workflow_dispatch:
+     inputs:
+       force:
+@@ -19,10 +20,14 @@ on:
+ permissions:
+   contents: write
+ 
++concurrency:
++  group: snapshot
++  cancel-in-progress: false
++
+ jobs:
+   snapshot:
+     runs-on: ubuntu-latest
+-    timeout-minutes: 45
++    timeout-minutes: 355
+     steps:
+       - uses: actions/checkout@v4
+       - uses: astral-sh/setup-uv@v6
+@@ -38,9 +43,12 @@ jobs:
+           FORCE_INPUT: ${{ inputs.force }}
+         run: |
+           FORCE=""
++          WAIT=""
+           if [ "$EVENT" = "push" ]; then FORCE="--force"; fi
+           if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" = "true" ]; then FORCE="--force"; fi
+-          .venv/bin/python scripts/snapshot.py $FORCE --runner actions --out snap --upload better
++          if [ "$EVENT" = "schedule" ]; then WAIT="--wait"; fi
++          if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" != "true" ]; then WAIT="--wait"; fi
++          .venv/bin/python scripts/snapshot.py $FORCE $WAIT --runner actions --out snap --upload better
+       - uses: actions/upload-artifact@v4
+         if: always()
+         with:
+```
+
+### 3c.2 output
+
+Pushed `a96f353` at 15:07 UTC. The push matched the workflow's `push` paths, so it started a forced run to `snapshots-test` (40898385139: success, 7m23s, `uploaded 4 files to release snapshots-test`). Then `gh workflow run snapshot.yml` with no force input started run 40898405093. The concurrency group held it as `pending` until the push run ended, and its Capture step started at 15:15:17 UTC.
+
+`gh run list --workflow snapshot.yml -L 3`, at 15:16:02 UTC:
+
+```
+in_progress		snapshot	snapshot	main	workflow_dispatch	40898405093	8m14s	2026-10-29T15:07:49Z
+completed	success	step 3c.1: capture waits for 15:30 New York	snapshot	main	push	40898385139	7m23s	2026-10-29T15:07:42Z
+completed	success	snapshot	snapshot	main	schedule	40792431105	19s	2026-10-29T00:11:42Z
+```
+
+**The first 20 log lines cannot be printed yet.** GitHub serves a job's log only once the job has finished. Run while the step was in progress:
+
+```
+$ gh run view 40898405093 --log
+run 40898405093 is still in progress; logs will be available when it is complete
+$ gh api repos/uty101/Volatility-Surface-and-Event-Pricing/actions/jobs/123538072209/logs
+<Error><Code>BlobNotFound</Code><Message>The specified blob does not exist. ...</Message></Error>gh: HTTP 404
+```
+
+The `waiting ... seconds` line will be in the log when the run completes, after about 19:37 UTC. From a start at 15:15:17 UTC it should read about 15,280 seconds. The evidence that the run is sleeping and not capturing is the step's state well past the length of a capture (the forced push run captured and uploaded in under 7 minutes in total), with no `snapshots` release yet:
+
+```
+Thu Oct 29 15:26:00 UTC 2026
+run in_progress, Capture step in_progress, started 2026-10-29T15:15:17Z
+in_progress		snapshot	snapshot	main	workflow_dispatch	40898405093	18m13s	2026-10-29T15:07:49Z
+completed	success	step 3c.1: capture waits for 15:30 New York	snapshot	main	push	40898385139	7m23s	2026-10-29T15:07:42Z
+completed	success	snapshot	snapshot	main	schedule	40792431105	19s	2026-10-29T00:11:42Z
+$ gh release view snapshots
+release not found
+```
+
+Steps and job of run 40898405093 at 15:15 UTC:
+
+```
+123538072209 1 Set up job completed success 2026-10-29T15:15:08Z
+123538072209 2 Run actions/checkout@v4 completed success 2026-10-29T15:15:10Z
+123538072209 3 Run astral-sh/setup-uv@v6 completed success 2026-10-29T15:15:12Z
+123538072209 4 Install from the lock completed success 2026-10-29T15:15:14Z
+123538072209 5 Capture in_progress  2026-10-29T15:15:17Z
+123538072209 6 Run actions/upload-artifact@v4 pending  0001-01-01T00:00:00Z
+```
+
+### Notes for the reviewer
+
+- **Concurrency keeps at most 1 pending run.** GitHub allows 1 running and 1 pending run per group. A newer pending run replaces the older one even with `cancel-in-progress: false`. With a sleeping run in progress, the 17:17 run waits as pending until the 18:47 run replaces it, and the 18:47 run then exits at check (a) once the sleeper has uploaded. Nothing is lost, but the Actions history will show the 17:17 runs as cancelled.
+- **Check (a) treats an unreadable release as "not captured".** If `gh release view snapshots` fails (no release yet, or a gh error), `existing_n_ok` is None and the run goes on to wait and capture. The `better` upload rule still protects a good existing asset.
+- **The skip line for `None`** reads `skip runner=actions ny=<date time> wait: not a session or after the window`. The instruction gives the text only for the already-captured skip.
+- **Timeout margin.** The worst case is the 15:17 UTC cron starting on time after the 2026-11-01 clock change: it waits until 20:30 UTC (5 h 13 min), and the capture takes about 7 min, inside `timeout-minutes: 355`.
