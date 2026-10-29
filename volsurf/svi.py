@@ -20,6 +20,7 @@ WING_MAX = 4.0  # kickoff Section 5.4: b (1 + |rho|) <= 4
 G_TOL = 1e-10  # kickoff Section 5.4: butterfly pass if min g >= -1e-10; calendar w_{i+1} >= w_i - 1e-10
 W_FLOOR = 1e-12  # instruction 04 part B: w clipped below at 1e-12 inside the square root
 SLSQP = {"maxiter": 1000, "ftol": 1e-14}  # instruction 04 part B: SLSQP fit settings
+SLSQP_MAXITER = 9  # scipy SLSQP exit status "Iteration limit reached" (O-32 (a), instruction 04b)
 CALENDAR_COLUMNS = ["day", "ticker", "expiry_1", "expiry_2", "T_1", "T_2", "n_grid", "n_violations", "min_diff",
                     "k_at_min", "violated"]
 
@@ -64,7 +65,7 @@ def _bounds(cfg):
 
 
 def _violation(p, constraints, bounds) -> float:
-    """Largest violation of the Section 5.4 bounds and constraints at p (0 when feasible), for the review."""
+    """Largest violation of the Section 5.4 bounds and constraints at p, 0 when every one is met exactly."""
     gaps = [lo - x for x, (lo, _) in zip(p, bounds, strict=True) if lo is not None]
     gaps += [x - hi for x, (_, hi) in zip(p, bounds, strict=True) if hi is not None]
     gaps += [-float(np.min(c["fun"](p))) for c in constraints]
@@ -76,51 +77,62 @@ def _fit(objective, start, constraints, bounds):
                     constraints=constraints, options=SLSQP)
 
 
+def _exit(r) -> str:
+    """O-32 (a): `success`, `maxiter` (SLSQP status 9, the iteration limit), or SLSQP's own status code."""
+    return "success" if r.success else "maxiter" if r.status == SLSQP_MAXITER else f"slsqp_{r.status}"
+
+
 def fit_svi(k, iv, T, cfg) -> dict:
-    """Instruction 04 part B fit of raw SVI to one expiry's OTM quotes (k, iv) at T.
+    """Instruction 04 part B fit of raw SVI to one expiry's OTM quotes (k, iv) at T, with O-32 (a) (instruction 04b).
 
     Objective sum (sqrt(max(w, 1e-12) / T) - iv)^2 under the Section 5.4 constraints, SLSQP from each
-    `[svi] starts` vector, lowest objective kept (Section 5.4; whether that start reported convergence, and its
-    largest constraint violation, are returned as first_success and first_violation for the review).
-    If its min g on the butterfly grid is below -1e-10, refit with g >= 0 at every grid point as a hard vector
-    constraint, from the first fit's parameters and then each start; the best converged refit with min g >= -1e-10
-    gives `ok_refit`, none gives `butterfly_fail`. An `ok` or `ok_refit` fit with RMSE above `max_rmse_volpts`
-    becomes `poor_fit`. Returns params (tuple, nan for too_few), rmse_vol, rmse_volpts, min_g, refit, n_quotes and
-    status; the parameters of a rejected fit are those of the fit that was judged, for diagnostics only."""
+    `[svi] starts` vector, lowest objective kept (Section 5.4). If its min g on the butterfly grid is below -1e-10,
+    refit with g >= 0 at every grid point as a hard vector constraint, from the first fit's parameters and then
+    each start. A refit counts if SLSQP reports success or stops at the iteration limit, and its result meets every
+    Section 5.4 bound and constraint exactly and has min g >= -1e-10; the best counting refit with RMSE <=
+    `max_rmse_volpts` gives `ok_refit`. If refits count but every one is above the RMSE gate, the best of them gives
+    `poor_fit`; if none counts, `butterfly_fail`. An `ok` first fit above the RMSE gate becomes `poor_fit`.
+    Returns params (tuple, nan for too_few), rmse_vol, rmse_volpts, min_g, refit, exit (of the fit judged),
+    n_quotes and status; the parameters of a rejected fit are those of the fit that was judged, for diagnostics."""
     k, iv = np.asarray(k, dtype=float), np.asarray(iv, dtype=float)
     out = {"n_quotes": len(k), "params": (np.nan,) * 5, "rmse_vol": np.nan, "rmse_volpts": np.nan,
-           "min_g": np.nan, "refit": False, "status": "too_few"}
+           "min_g": np.nan, "refit": False, "exit": "", "status": "too_few"}
     if len(k) < cfg.svi.min_quotes:
         return out
+
+    def rmse(p):
+        return float(np.sqrt(np.mean((np.sqrt(np.maximum(svi_w(k, *p), W_FLOOR) / T) - iv) ** 2)))
 
     def objective(p):
         return float(np.sum((np.sqrt(np.maximum(svi_w(k, *p), W_FLOOR) / T) - iv) ** 2))
 
     grid = butterfly_grid(k, cfg)
     cons, bounds = _constraints(cfg), _bounds(cfg)
+    max_rmse = cfg.svi.max_rmse_volpts / 100
 
     first = min((_fit(objective, start, cons, bounds) for start in cfg.svi.starts), key=lambda r: r.fun)
-    out["first_success"], out["first_violation"] = bool(first.success), _violation(first.x, cons, bounds)
-    params, status = first.x, "ok"
-    min_g = float(svi_g(grid, params).min())
+    kept, status = first, "ok"
+    min_g = float(svi_g(grid, first.x).min())
     if min_g < -G_TOL:
         out["refit"] = True
         g_con = cons + [{"type": "ineq", "fun": lambda p: svi_g(grid, p)}]
-        passing = []
+        counting = []
         for start in [first.x, *cfg.svi.starts]:
             r = _fit(objective, start, g_con, bounds)
-            if r.success and svi_g(grid, r.x).min() >= -G_TOL:
-                passing.append(r)
-        if passing:
-            r = min(passing, key=lambda r: r.fun)
-            params, status, min_g = r.x, "ok_refit", float(svi_g(grid, r.x).min())
+            if (_exit(r) in ("success", "maxiter") and _violation(r.x, cons, bounds) == 0
+                    and svi_g(grid, r.x).min() >= -G_TOL):
+                counting.append(r)
+        good = [r for r in counting if rmse(r.x) <= max_rmse]
+        if good or counting:
+            kept = min(good or counting, key=lambda r: r.fun)
+            status, min_g = ("ok_refit" if good else "poor_fit"), float(svi_g(grid, kept.x).min())
         else:
             status = "butterfly_fail"
-    rmse = float(np.sqrt(np.mean((np.sqrt(np.maximum(svi_w(k, *params), W_FLOOR) / T) - iv) ** 2)))
-    if status in ACCEPTED and 100 * rmse > cfg.svi.max_rmse_volpts:
+    if status == "ok" and rmse(first.x) > max_rmse:
         status = "poor_fit"
-    out.update(params=tuple(float(x) for x in params), rmse_vol=rmse, rmse_volpts=100 * rmse, min_g=min_g,
-               status=status)
+    e = rmse(kept.x)
+    out.update(params=tuple(float(x) for x in kept.x), rmse_vol=e, rmse_volpts=100 * e, min_g=min_g,
+               exit=_exit(kept), status=status)
     return out
 
 

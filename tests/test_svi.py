@@ -22,7 +22,6 @@ from volsurf.svi import (
 ROOT = Path(__file__).resolve().parents[1]
 CFG = load_config(ROOT / "config.toml")
 FIXTURE_DAY = date(2026, 10, 28)  # instruction 01d part B
-MIN_ACCEPTED = {SPX: 28, "SPY": 23, "AAPL": 13}  # instruction 04 step 4.1
 TRUE = (0.02, 0.15, -0.4, 0.05, 0.2)
 # Axel Vogt's raw SVI slice (Gatheral and Jacquier 2014, Section 5.1): negative density near the money
 VOGT = (-0.0410, 0.1331, 0.3060, 0.3586, 0.4153)
@@ -90,7 +89,8 @@ def fixture_iv() -> pd.DataFrame:
 
 
 def test_fixture_accepted_slices():
-    # instruction 04 step 4.1: accepted (ok plus ok_refit) slices on the fixture day, per ticker
+    # instruction 04b part B: per fixture ticker, accepted (ok plus ok_refit) slices / slices with at least
+    # min_quotes quotes >= [svi] min_accept_share
     iv = fixture_iv()
     iv = iv[iv["iv"].notna()]
     rows = []
@@ -98,10 +98,16 @@ def test_fixture_accepted_slices():
         fit = fit_svi(np.log(g["strike"] / g["F"]), g["iv"], g["T"].iloc[0], CFG)
         rows.append({"ticker": ticker, "expiry": expiry, "T": g["T"].iloc[0], "n_quotes": fit["n_quotes"],
                      **dict(zip(PARAMS, fit["params"], strict=True)), "rmse_volpts": fit["rmse_volpts"],
-                     "min_g": fit["min_g"], "refit": fit["refit"], "status": fit["status"]})
+                     "min_g": fit["min_g"], "refit": fit["refit"], "exit": fit["exit"], "status": fit["status"]})
     table = pd.DataFrame(rows)
     print(table.to_string())
     print(pd.crosstab(table["ticker"], table["status"]).to_string())
-    accepted = table[table["status"].isin(ACCEPTED)].groupby("ticker").size()
-    for ticker, bound in MIN_ACCEPTED.items():
-        assert accepted.get(ticker, 0) >= bound, (ticker, int(accepted.get(ticker, 0)), bound)
+    fitted = table[table["n_quotes"] >= CFG.svi.min_quotes]
+    share = pd.DataFrame({"accepted": fitted["status"].isin(ACCEPTED).groupby(fitted["ticker"], sort=False).sum(),
+                          "fitted": fitted.groupby("ticker", sort=False).size()})
+    share["share"] = share["accepted"] / share["fitted"]
+    print(share.to_string())
+    print(table.loc[table["status"] != "ok",
+                    ["ticker", "expiry", "T", "n_quotes", "refit", "exit", "rmse_volpts", "min_g", "status"]].to_string())
+    assert set(share.index) == {SPX, "SPY", "AAPL"}
+    assert (share["share"] >= CFG.svi.min_accept_share).all(), share
