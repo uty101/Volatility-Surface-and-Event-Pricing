@@ -1,7 +1,7 @@
 """Rebuild entry point (O-1 (a)): each step's driver is a stage, run with --stage <name>.
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
-Section 3 the clean_log stage.
+Section 3 the clean_log and iv stages.
 """
 
 from __future__ import annotations
@@ -17,11 +17,13 @@ sys.path.insert(0, str(ROOT))
 import pandas as pd
 
 from volsurf.config import load_config
-from volsurf.data import RATE_TENORS, capture_health, clean_chain
+from volsurf.data import RATE_TENORS, capture_health, clean_chain, load_snapshot
 from volsurf.forwards import clean_with_forwards
+from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
 
 SNAPSHOTS = ROOT / "data" / "snapshots"
+PROCESSED = ROOT / "data" / "processed"
 RAW = ROOT / "data" / "raw"
 FIXTURES = ROOT / "tests" / "fixtures"
 TABLES = ROOT / "outputs" / "tables"
@@ -81,7 +83,44 @@ def stage_eep(cfg) -> Path:
     return out
 
 
-STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep}
+def _iv_day(day: date, chains: pd.DataFrame, underlying: pd.DataFrame, cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """One day's IV table (PLAN 3.3) and its `^SPX` forwards; the IV table goes to data/processed/iv/{day}.parquet."""
+    fred, divs = _fred(), pd.read_csv(RAW / "prices" / "dividends.csv")
+    clean, _, forwards = clean_with_forwards(chains, underlying, fred, day, cfg)
+    iv = iv_chain(iv_inputs(clean, underlying, fred, divs, forwards, day, cfg), cfg)
+    out = PROCESSED / "iv" / f"{day.isoformat()}.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    iv.to_parquet(out, index=False)
+    print(f"{day}: {len(iv)} IV rows -> {out}")
+    return iv, forwards
+
+
+def stage_iv(cfg) -> Path:
+    """Instruction 03 step 3.3 with 03b: OTM IVs for the fixture day and every downloaded snapshot day, each
+    ticker used only if its SNAPLOG status is ok (O-5 (b)); iv_summary.csv, and the fixture day's ^SPX forwards
+    in parity_forwards_fixture.csv."""
+    chains = pd.read_parquet(FIXTURES / "chains_sample.parquet")
+    underlying = pd.read_csv(FIXTURES / "underlying_sample.csv")
+    iv, forwards = _iv_day(FIXTURE_DAY, chains, underlying, cfg)
+    summaries = [iv_summary(iv)]
+    days = sorted(date.fromisoformat(p.stem.removeprefix("chains_")) for p in SNAPSHOTS.glob("chains_*.parquet"))
+    for day in days:
+        snap = load_snapshot(day, SNAPSHOTS)
+        ok = set(snap["snaplog"].loc[snap["snaplog"]["status"] == "ok", "ticker"])
+        day_iv, _ = _iv_day(day, snap["chains"][snap["chains"]["ticker"].isin(ok)],
+                            snap["underlying"][snap["underlying"]["ticker"].isin(ok)], cfg)
+        summaries.append(iv_summary(day_iv))
+    TABLES.mkdir(parents=True, exist_ok=True)
+    forwards.to_csv(TABLES / "parity_forwards_fixture.csv", **CSV)
+    summary = pd.concat(summaries, ignore_index=True)
+    out = TABLES / "iv_summary.csv"
+    summary.to_csv(out, **CSV)
+    print(forwards.to_string())
+    print(summary.to_string())
+    return out
+
+
+STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv}
 
 
 def main(argv: list[str] | None = None) -> int:

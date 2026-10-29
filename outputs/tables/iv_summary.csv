@@ -1,0 +1,4 @@
+day,ticker,n_in,n_solved,n_newton,n_brent,n_batch,n_bounds,n_no_root,n_flat,n_parity_fail
+2026-10-28,^SPX,6841,6841,2473,4368,0,0,0,0,0
+2026-10-28,SPY,3531,3531,0,0,3531,0,0,0,0
+2026-10-28,AAPL,461,461,0,0,461,0,0,0,0
