@@ -29,7 +29,7 @@ SUMMARY_COLUMNS = ["day", "ticker", "n_in", "n_solved", "n_newton", "n_brent", "
                    "n_flat", "n_parity_fail"]
 METHODS = ["newton", "brent", "batch", "bounds", "no_root", "flat"]
 BRENT_TOL = 1e-14  # instruction 03b part B: brentq xtol and rtol in the scalar solvers
-FLAT_BUMP = 0.01  # instruction 03b part B: sens = |P(sigma + 0.01) - P(sigma - 0.01)| / 2
+FLAT_BUMP = 0.01  # instruction 04 step 4.0: sens = min(|P(sigma + 0.01) - P(sigma)|, |P(sigma) - P(sigma - 0.01)|)
 
 
 def price_bounds(price, S, F, K, D, kind, american) -> bool:
@@ -45,9 +45,11 @@ def price_bounds(price, S, F, K, D, kind, american) -> bool:
 
 
 def _sens(pricer, sigma: float, cfg) -> float:
-    """Instruction 03b flat-price rule: |P(sigma + 0.01) - P(sigma - 0.01)| / 2, both clipped to [iv_lo, iv_hi]."""
+    """One-sided flat-price rule (instruction 04 step 4.0): min(|P(sigma + 0.01) - P(sigma)|,
+    |P(sigma) - P(sigma - 0.01)|), both bumped vols clipped to [iv_lo, iv_hi]."""
     lo, hi = cfg.iv.iv_lo, cfg.iv.iv_hi
-    return abs(pricer(min(sigma + FLAT_BUMP, hi)) - pricer(max(sigma - FLAT_BUMP, lo))) / 2
+    p = pricer(sigma)
+    return min(abs(pricer(min(sigma + FLAT_BUMP, hi)) - p), abs(p - pricer(max(sigma - FLAT_BUMP, lo))))
 
 
 def _brent(f, cfg) -> float | None:
@@ -184,7 +186,8 @@ def iv_american_batch(prices, S, K, T, r, q, kind, cfg) -> tuple[np.ndarray, np.
         f_lo = np.where(up, f_mid, f_lo)
     sigma = (lo + hi) / 2
     up_s, dn_s = np.minimum(sigma + FLAT_BUMP, c.iv_hi), np.maximum(sigma - FLAT_BUMP, c.iv_lo)
-    sens = np.abs(f(idx, up_s) - f(idx, dn_s)) / 2  # the price cancels in the difference
+    f_s = f(idx, sigma)
+    sens = np.minimum(np.abs(f(idx, up_s) - f_s), np.abs(f_s - f(idx, dn_s)))  # the price cancels
     flat = sens < c.flat_tol
     status[idx[flat]] = "flat"
     status[idx[~flat]] = "batch"

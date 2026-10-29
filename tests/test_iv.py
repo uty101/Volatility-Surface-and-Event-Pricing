@@ -15,7 +15,6 @@ from volsurf.iv import (
     _sens,
     iv_american,
     iv_american_batch,
-    iv_american_refine,
     iv_european,
     iv_inputs,
     price_bounds,
@@ -81,6 +80,17 @@ def test_flat_rule():
     assert m == "newton" and abs(v - 0.30) <= TOL
     v, m = iv_american(crr(S, 100, T, R, Q, 0.30, "P", CFG.pricing.n_prod, True), S, 100, T, R, Q, "P", CFG)
     assert m == "brent" and abs(v - 0.30) <= TOL
+
+
+def test_flat_rule_one_sided_at_immediate_exercise():
+    # instruction 04 step 4.0: the P 130, 365-day, sigma 0.15 American grid put sits at immediate exercise;
+    # the one-sided rule makes it flat from the scalar and the batch solver alike
+    T = 365 / 365
+    price = crr(S, 130, T, R, Q, 0.15, "P", CFG.pricing.n_prod, True)
+    v, m = iv_american(price, S, 130, T, R, Q, "P", CFG)
+    assert np.isnan(v) and m == "flat"
+    iv, status = iv_american_batch([price], [S], [130], [T], [R], [Q], ["P"], CFG)
+    assert np.isnan(iv[0]) and status[0] == "flat"
 
 
 def test_bounds_flagged():
@@ -155,13 +165,9 @@ def test_batch_timing_fixture_american_otm():
 
 
 def test_american_n200_vs_n2000_measure():
-    # MEASURE (PLAN 3.2): the largest American IV gap between N = 200 and N = 2000 on fixture OTM rows
-    rows = _otm(_fixture_american())
-    args = (rows["mid"], rows["S"], rows["strike"], rows["T"], rows["r"], rows["q"], rows["kind"])
-    iv200, _ = iv_american_batch(*args, CFG)
-    solved = np.isfinite(iv200)
-    iv2000, iters = iv_american_refine(*(a[solved] for a in args), iv200[solved], CFG.pricing.n_validate, CFG)
-    gap = np.abs(iv2000 - iv200[solved])
-    print(f"N = 200 against N = {CFG.pricing.n_validate}: {solved.sum()} rows, {iters} Newton iterations, "
-          f"largest gap {np.nanmax(gap):.6g}, median {np.nanmedian(gap):.6g}, unconverged {np.isnan(gap).sum()}")
-    assert np.isfinite(np.nanmax(gap))
+    # MEASURE (PLAN 3.2): the N = 200 against N = 2000 gaps, measured by scripts/measure_iv_tree.py into the
+    # committed CSV (instruction 04 step 4.0); the test only reads it
+    table = pd.read_csv(ROOT / "outputs" / "tables" / "iv_tree_convergence.csv")
+    assert list(table.columns) == ["ticker", "expiry", "kind", "strike", "iv_200", "iv_2000", "gap"]
+    print(f"{len(table)} rows, largest gap {table['gap'].max():.6g}, median {table['gap'].median():.6g}")
+    assert len(table) > 0 and np.isfinite(table["gap"]).all()

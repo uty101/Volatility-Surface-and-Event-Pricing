@@ -12,3 +12,14 @@ One line per item: the choice made and the reviewer's reason where one was given
 - **`[iv] am_vol_tol`.** 1e-9, not the 1e-7 of instruction 03, so the batch solver stays inside the 1e-8 round trip.
 - **Status 3 (SPY K 50 call, 42.96 vol points).** Accepted with no change. An American IV of 134% on SPY comes from a stale deep ITM quote; `premium_pct_mid` (0.55%) is the meaningful number, and the bin medians do not move.
 - **Status 4 (interpretations).** All accepted.
+
+## Session 3b and 3c
+
+Decided in instruction 04 part A. Section 3 and session 3c are approved.
+
+- **3b item 1 (the batch flat rule misses the P 130 edge case).** Use the one-sided rule in step 4.0: sens = min(|P(σ̂ + 0.01) − P(σ̂)|, |P(σ̂) − P(σ̂ − 0.01)|), both vols clipped to [`iv_lo`, `iv_hi`], `flat` if sens < `flat_tol`, for every solver. The reviewer reran its 504-case grid with it: 424 within 1e-8, 80 flagged, 0 wrong.
+- **3b item 2 (64% Brent on `^SPX`).** Accepted.
+- **3b item 3 (interpretations).** All accepted.
+- **3b item 4 (6-minute suite).** The N = 2000 measurement becomes a script, `scripts/measure_iv_tree.py` (step 4.0).
+- **3c items 2 and 3 (the local task).** Remove the local task completely (step 4.0). The owner asked for it to go; with the GitHub runs now waiting for the window it is no longer needed, and its 2026-10-28 runs were killed without writing a line.
+- **3c item 4 (1 pending run).** Accepted.
