@@ -29,12 +29,14 @@ from volsurf.snapshots import (
     EARNINGS_COLUMNS,
     NY,
     UNDERLYING_COLUMNS,
+    already_captured,
     chain_frame,
     earnings_frame,
     filter_expiries,
     in_window,
     is_session,
     keep_spxw,
+    seconds_until_target,
     should_upload,
     snapshot_log,
 )
@@ -182,12 +184,42 @@ def append_log(out: Path, line: str) -> None:
         fh.write(line + "\n")
 
 
+def captured_today(out: Path, runner: str, cfg: dict) -> bool:
+    """Check (a) of instruction 03c step 3c.1: True (and logged) when the release already holds today's snaplog
+    with at least min_tickers_ok tickers ok."""
+    snap = cfg["snapshot"]
+    name = f"snaplog_{now_utc().astimezone(NY).date().isoformat()}.json"
+    names = gh("release", "view", snap["release_tag"], "--json", "assets", "--jq", ".assets[].name")
+    existing = existing_n_ok(snap["release_tag"], name) if names.returncode == 0 else None
+    if already_captured(existing, snap["min_tickers_ok"]):
+        append_log(out, f"{now_utc().isoformat()} skip: already captured n_ok={existing} runner={runner}")
+        return True
+    return False
+
+
+def wait_for_target(out: Path, runner: str, cfg: dict) -> bool:
+    """--wait (instruction 03c step 3c.1): checks (a) to (c). False means exit 0 without capturing."""
+    if captured_today(out, runner, cfg):
+        return False
+    now = now_utc()
+    wait = seconds_until_target(now, cfg)
+    if wait is None:
+        append_log(out, f"{now.isoformat()} skip runner={runner} ny={now.astimezone(NY):%Y-%m-%d %H:%M:%S} "
+                        f"wait: not a session or after the window")
+        return False
+    if wait > 0:
+        append_log(out, f"{now.isoformat()} waiting {wait:.0f} seconds until {cfg['snapshot']['target_ny']} New York")
+        time.sleep(wait)
+    return not captured_today(out, runner, cfg)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--force", action="store_true")
     p.add_argument("--runner", choices=["actions", "local"], required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--upload", choices=["always", "if-missing", "better", "never"], required=True)
+    p.add_argument("--wait", action="store_true", help="sleep until target_ny, skipping if already captured")
     args = p.parse_args(argv)
 
     with open(ROOT / "config.toml", "rb") as fh:
@@ -197,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
     if not out.is_absolute():
         out = ROOT / out
     out.mkdir(parents=True, exist_ok=True)
+
+    if args.wait and not args.force and not wait_for_target(out, args.runner, cfg):
+        return 0
 
     start = now_utc()
     ny_start = start.astimezone(NY)

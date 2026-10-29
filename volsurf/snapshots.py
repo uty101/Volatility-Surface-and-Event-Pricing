@@ -124,6 +124,26 @@ def should_upload(existing_n_ok: int | None, new_n_ok: int) -> bool:
     return existing_n_ok is None or new_n_ok > existing_n_ok
 
 
+def seconds_until_target(now_utc: datetime, cfg) -> float | None:
+    """Instruction 03c step 3c.1: None when the New York date is not a session or the New York time is after
+    window_end_ny; 0.0 inside [window_start_ny, window_end_ny]; otherwise the seconds until target_ny on that
+    New York date."""
+    snap = cfg["snapshot"]
+    ny = now_utc.astimezone(NY)
+    t = ny.time()
+    if not is_session(ny.date()) or t > time.fromisoformat(snap["window_end_ny"]):
+        return None
+    if time.fromisoformat(snap["window_start_ny"]) <= t:
+        return 0.0
+    target = datetime.combine(ny.date(), time.fromisoformat(snap["target_ny"]), tzinfo=NY)
+    return (target - ny).total_seconds()
+
+
+def already_captured(existing_n_ok: int | None, min_ok: int) -> bool:
+    """Instruction 03c step 3c.1: the release already holds today's snaplog with at least min_ok tickers ok."""
+    return existing_n_ok is not None and existing_n_ok >= min_ok
+
+
 def snapshot_log(rows: list[dict]) -> dict:
     """Per-ticker status rows -> the per-ticker part of SNAPLOG with status counts."""
     counts = {s: sum(r["status"] == s for r in rows) for s in ("ok", "partial", "error")}

@@ -7,12 +7,14 @@ import pandas as pd
 from volsurf.snapshots import (
     CHAINS_COLUMNS,
     NY,
+    already_captured,
     chain_frame,
     classify_timing,
     filter_expiries,
     in_window,
     is_session,
     keep_spxw,
+    seconds_until_target,
     should_upload,
 )
 
@@ -88,3 +90,18 @@ def test_should_upload_tie_keeps_existing():
 
 def test_should_upload_fewer_tickers_ok():
     assert not should_upload(32, 10)
+
+
+def test_seconds_until_target():
+    # instruction 03c step 3c.1
+    assert seconds_until_target(datetime(2026, 10, 29, 15, 17, tzinfo=UTC), CFG) == 15180  # to 19:30 UTC, EDT
+    assert seconds_until_target(datetime(2026, 11, 2, 15, 17, tzinfo=UTC), CFG) == 18780  # to 20:30 UTC, EST
+    assert seconds_until_target(datetime(2026, 10, 29, 19, 40, tzinfo=UTC), CFG) == 0.0
+    assert seconds_until_target(datetime(2026, 10, 29, 20, 31, tzinfo=UTC), CFG) is None
+    assert seconds_until_target(datetime(2026, 10, 31, 15, 17, tzinfo=UTC), CFG) is None  # Saturday
+
+
+def test_already_captured():
+    assert not already_captured(None, 33)
+    assert already_captured(33, 33)
+    assert not already_captured(20, 33)

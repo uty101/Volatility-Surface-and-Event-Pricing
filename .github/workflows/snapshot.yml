@@ -2,8 +2,9 @@ name: snapshot
 
 on:
   schedule:
-    - cron: "30 19 * * 1-5"
-    - cron: "30 20 * * 1-5"
+    - cron: "17 15 * * 1-5"
+    - cron: "17 17 * * 1-5"
+    - cron: "47 18 * * 1-5"
   workflow_dispatch:
     inputs:
       force:
@@ -19,10 +20,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -38,9 +43,12 @@ jobs:
           FORCE_INPUT: ${{ inputs.force }}
         run: |
           FORCE=""
+          WAIT=""
           if [ "$EVENT" = "push" ]; then FORCE="--force"; fi
           if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" = "true" ]; then FORCE="--force"; fi
-          .venv/bin/python scripts/snapshot.py $FORCE --runner actions --out snap --upload better
+          if [ "$EVENT" = "schedule" ]; then WAIT="--wait"; fi
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE_INPUT" != "true" ]; then WAIT="--wait"; fi
+          .venv/bin/python scripts/snapshot.py $FORCE $WAIT --runner actions --out snap --upload better
       - uses: actions/upload-artifact@v4
         if: always()
         with:
