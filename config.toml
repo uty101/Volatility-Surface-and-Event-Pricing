@@ -41,6 +41,8 @@ iv_hi = 5.0
 iv_tol = 1e-10
 newton_max_iter = 50
 min_vega = 1e-6
+flat_tol = 1e-4
+am_vol_tol = 1e-9
 
 [forwards]
 parity_n_strikes = 10
