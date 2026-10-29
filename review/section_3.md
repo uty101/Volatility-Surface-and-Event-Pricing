@@ -563,3 +563,257 @@ Steps and job of run 40898405093 at 15:15 UTC:
 - **Check (a) treats an unreadable release as "not captured".** If `gh release view snapshots` fails (no release yet, or a gh error), `existing_n_ok` is None and the run goes on to wait and capture. The `better` upload rule still protects a good existing asset.
 - **The skip line for `None`** reads `skip runner=actions ny=<date time> wait: not a session or after the window`. The instruction gives the text only for the already-captured skip.
 - **Timeout margin.** The worst case is the 15:17 UTC cron starting on time after the 2026-11-01 clock change: it waits until 20:30 UTC (5 h 13 min), and the capture takes about 7 min, inside `timeout-minutes: 355`.
+
+## Session 3b
+
+Instruction 03b: steps 3.2 and 3.3, with the flat-price rule and the decisions of part B. Section 3 is now complete.
+
+### Steps completed
+
+- B    4c1fcf9  section 3b: section 3 review decisions recorded (`decisions/section_3_review.md`)
+- 3.2  b02f724  step 3.2: implied volatility (`volsurf/iv.py`, `tests/test_iv.py`; `[iv] flat_tol = 1e-4`, `am_vol_tol = 1e-9`)
+- 3.3  75ec927  step 3.3: IV on every captured day (`iv` stage in `scripts/run_all.py`, `tests/test_iv_chain.py`, `outputs/tables/iv_summary.csv`, `outputs/tables/parity_forwards_fixture.csv`)
+
+Session 3c (`a96f353`, `a149d82`) ran between 3b's decisions and step 3.2 and is recorded above.
+
+### 3b-D1. Round trips: status counts for both models, and every returned vol's largest error
+
+The full 2.1 grid, 252 cases per model. European: Black-76 on F = S e^((r − q)T), D = e^(−rT), solved by `iv_european`. American: CRR at `n_prod`, solved by the scalar `iv_american`. Brent runs at `xtol = rtol = 1e-14`.
+
+```
+COUNTS
+method    bounds  brent  flat  newton  no_root
+model                                         
+american       8    206    33       0        5
+european       6    102    28     116        0
+LARGEST
+        model kind    K  days  sigma   iv  method       abs_err
+399  american    P  110     7    0.3  0.3   brent  2.514938e-11
+448  european    P  120    91    0.6  0.6  newton  4.626077e-12
+WRONG 0
+BATCH_DISAGREE
+    kind    K  days  sigma  iv method  iv_batch status_batch
+493    P  130   365   0.15 NaN   flat  0.209932        batch
+```
+
+Every case returns either a vol within `iv_roundtrip` = 1e-8 or no vol with status `flat`, `no_root` or `bounds`. No returned vol is wrong. 424 cases are solved (218 European, 206 American) and 80 are flagged (34 European, 46 American), which matches the reviewer's 424 and 80. The split of the flagged cases differs. Here, prices outside the Section 5.3 bounds are caught as `bounds` before any solve (6 European, 8 American), where the reviewer's run counted them as `flat` or `no_root`.
+
+`BATCH_DISAGREE` is the one grid case where `iv_american_batch` and the scalar solver disagree. It is not a fixture row, and no test covers the batch solver on the grid. The P 130, 365-day, σ 0.15 put is at immediate exercise: its tree price equals intrinsic, to ±3e-12, for every σ up to about 0.21, and then rises. Brent lands inside that flat stretch, where sens < 1e-4 gives `flat`. Bisection lands at the edge, 0.2099, where σ + 0.01 is already on the rising part, so sens = 0.024 passes the rule and a vol comes back. The flat rule measures sensitivity on both sides of σ̂, so a solve that ends at the edge of a flat region gets through. On real data this is an ITM-only case, and `iv_chain` solves OTM quotes only.
+
+### 3b-D2. Batch against scalar: gaps, status agreement and timing
+
+The test `test_batch_matches_scalar_on_200_fixture_rows` draws 200 clean American fixture rows (SPY and AAPL, ITM and OTM) with `default_rng([run] seed)`. Statuses match on every row (the scalar `brent` is compared with `batch`):
+
+```
+statuses {'batch': 194, 'no_root': 6}; largest gap 2.89e-10, median 1.51e-10
+```
+
+The same comparison on every clean American fixture row (7,108), run once with a script while building. Status crosstab (scalar rows, batch columns) and gap by OTM:
+
+```
+st_b           batch  no_root
+otm   st_s                   
+False brent     2898        0
+      no_root      0      218
+True  brent     3992        0
+                max        median  count
+otm                                     
+False  2.919979e-10  1.459112e-10   2898
+True   2.906541e-10  1.419969e-10   3992
+disagree 0
+Empty DataFrame
+Columns: [ticker, expiry, kind, strike, S, T, mid, otm, iv_s, st_s, iv_b, st_b, gap]
+Index: []
+```
+
+Timing, on Windows on the owner's machine (the Python process runs single-threaded):
+
+```
+batch on 3992 fixture American OTM rows: 38.8 s; {'batch': 3992}
+```
+
+That is under the 300 s bound of instruction 03. `crr_batch` holds the nodes × options array and updates it in place. At N = 200 and N = 2000 its prices are bit-identical to `crr` on 300 sampled fixture rows (largest difference 0.0). The step 2.3 scalar route took 169 s for 7,108 rows.
+
+### 3b-D3. N = 200 against N = 2000
+
+`test_american_n200_vs_n2000_measure`: the 3,992 fixture American OTM rows are solved at N = 200 by `iv_american_batch`, then at N = `n_validate` = 2000 by `iv_american_refine`. That is Newton on `crr_batch` at 2000 steps, from the N = 200 vol, with BSM vega as the slope, until every step is below `am_vol_tol`, for at most `newton_max_iter` iterations.
+
+```
+N = 200 against N = 2000: 3992 rows, 6 Newton iterations, largest gap 0.00335205, median 0.000151423, unconverged 0
+```
+
+The largest gap is 0.34 vol points, and the median is 0.015 vol points. The test asserts only that the gap is finite (MEASURE).
+
+### 3b-D4. `parity_forwards_fixture.csv` in full
+
+```
+        expiry         T         r         D            F    mad_bp  n_pairs    q_impl     r_reg status
+0   2026-10-29  0.003309  0.040683  0.999865  7731.925259  0.390665       10 -0.017766       NaN     ok
+1   2026-10-30  0.006048  0.040683  0.999754  7733.927196  0.520511       10 -0.034093       NaN     ok
+2   2026-11-02  0.014382  0.040683  0.999415  7735.347279  0.595326       10 -0.003531       NaN     ok
+3   2026-11-03  0.017121  0.040683  0.999304  7735.897143  0.332401       10 -0.000607       NaN     ok
+4   2026-11-04  0.019861  0.040683  0.999192  7736.489087  0.208099       10  0.001236       NaN     ok
+5   2026-11-05  0.022601  0.040683  0.999081  7737.518124  0.690671       10  0.000133       NaN     ok
+6   2026-11-06  0.025340  0.040683  0.998970  7740.443489  0.274324       10 -0.010400       NaN     ok
+7   2026-11-09  0.033560  0.040683  0.998636  7740.696416  0.405742       10  0.001137       NaN     ok
+8   2026-11-10  0.036299  0.040683  0.998524  7741.868339  0.279379       10 -0.000048       NaN     ok
+9   2026-11-11  0.039039  0.040683  0.998413  7741.638307  0.835817       10  0.003571       NaN     ok
+10  2026-11-12  0.041779  0.040683  0.998302  7742.500475  0.722559       10  0.003339       NaN     ok
+11  2026-11-13  0.044518  0.040683  0.998190  7743.963839  0.620345       10  0.001392       NaN     ok
+12  2026-11-16  0.052738  0.040683  0.997857  7743.779533  0.242659       10  0.007967       NaN     ok
+13  2026-11-17  0.055477  0.040683  0.997746  7744.104342  0.499922       10  0.008827       NaN     ok
+14  2026-11-18  0.058217  0.040683  0.997634  7744.932639  0.415408       10  0.008489       NaN     ok
+15  2026-11-19  0.060957  0.040683  0.997523  7744.811454  0.663526       10  0.010193       NaN     ok
+16  2026-11-20  0.063696  0.040683  0.997412  7746.197509  0.357073       10  0.008695       NaN     ok
+17  2026-11-23  0.071916  0.040683  0.997079  7747.197153  0.404366       10  0.010556       NaN     ok
+18  2026-11-24  0.074655  0.040683  0.996967  7747.898955  0.608039       10  0.010449       NaN     ok
+19  2026-11-25  0.077395  0.040683  0.996856  7749.960579  0.497413       10  0.008081       NaN     ok
+20  2026-11-27  0.082874  0.040683  0.996634  7752.375314  0.280639       10  0.006478  0.077889     ok
+21  2026-11-30  0.091094  0.040734  0.996296  7753.189591  0.449509       10  0.008461 -0.071620     ok
+22  2026-12-01  0.093833  0.040751  0.996183  7753.367210  0.838293        8  0.009177  0.055533     ok
+23  2026-12-03  0.099313  0.040787  0.995958  7753.590043  0.489732       10  0.010665  0.057250     ok
+24  2026-12-04  0.102052  0.040804  0.995844  7755.259188  0.458225       10  0.009382 -0.028878     ok
+25  2026-12-11  0.121230  0.040928  0.995051  7760.539793  0.633429       10  0.008862  0.119817     ok
+26  2026-12-18  0.140409  0.041052  0.994252  7765.248271  0.334998       10  0.009046  0.045813     ok
+27  2026-12-31  0.176025  0.041283  0.992760  7777.177790  0.561604       10  0.007032  0.034189     ok
+28  2027-01-15  0.217121  0.041548  0.991020  7794.520202  0.319080       10  0.003521  0.051545     ok
+29  2027-01-29  0.255477  0.041789  0.989381  7805.394443  0.321724       10  0.004014 -0.010088     ok
+30  2027-02-19  0.313011  0.042082  0.986914  7821.388424  0.595902        9  0.004711  0.047002     ok
+31  2027-02-26  0.332189  0.042179  0.986086  7827.646701  0.360462       10  0.004558  0.079248     ok
+32  2027-03-19  0.389609  0.042472  0.983589  7841.745373  0.810618        9  0.005776  0.045047     ok
+33  2027-03-31  0.422486  0.042639  0.982147  7851.321332  0.599872       10  0.005910  0.053388     ok
+34  2027-06-30  0.671801  0.043437  0.971241  7932.897822  0.178584       10  0.004953  0.048835     ok
+35  2027-09-30  0.923856  0.044029  0.960140  8019.957064  0.294012       10  0.004230  0.045065     ok
+```
+
+These are the same values as the session 3 D2 table.
+
+### 3b-D5. `iv_summary.csv` in full, and 10 random solved rows with all inputs
+
+`scripts/pull_snapshots.py` ran first. The `snapshots` release still does not exist (`release snapshots does not exist; wrote header-only snapshot_manifest.csv`), so the run covers the fixture day alone, which instruction 03b allows.
+
+```
+          day ticker  n_in  n_solved  n_newton  n_brent  n_batch  n_bounds  n_no_root  n_flat  n_parity_fail
+0  2026-10-28   ^SPX  6841      6841      2473     4368        0         0          0       0              0
+1  2026-10-28    SPY  3531      3531         0        0     3531         0          0       0              0
+2  2026-10-28   AAPL   461       461         0        0      461         0          0       0              0
+```
+
+10 solved rows drawn with `default_rng([run] seed)` from `data/processed/iv/2026-10-28.parquet`:
+
+```
+             day ticker      expiry kind  strike         T            S            F         r         q      mid        iv  method   flag
+173   2026-10-28   ^SPX  2026-10-30    C  7835.0  0.006048  7730.430176  7733.927196  0.040683 -0.034093    5.600  0.146320   brent       
+234   2026-10-28   ^SPX  2026-10-30    P  6830.0  0.006048  7730.430176  7733.927196  0.040683 -0.034093    0.175  0.552958   brent       
+712   2026-10-28   ^SPX  2026-11-03    P  7450.0  0.017121  7730.430176  7735.897143  0.040683 -0.000607    4.600  0.183850   brent       
+1180  2026-10-28   ^SPX  2026-11-06    C  8125.0  0.025340  7730.430176  7740.443489  0.040683 -0.010400    0.550  0.130646   brent       
+1789  2026-10-28   ^SPX  2026-11-11    P  7425.0  0.039039  7730.430176  7741.638307  0.040683  0.003571   18.100  0.187098   brent       
+1831  2026-10-28   ^SPX  2026-11-11    P  7695.0  0.039039  7730.430176  7741.638307  0.040683  0.003571   63.950  0.140294  newton       
+5859  2026-10-28   ^SPX  2027-03-31    P  6275.0  0.422486  7730.430176  7851.321332  0.042639  0.005910   54.950  0.266500   brent  stale
+6070  2026-10-28   ^SPX  2027-03-31    P  7415.0  0.422486  7730.430176  7851.321332  0.042639  0.005910  176.050  0.179829  newton       
+7087  2026-10-28    SPY  2026-11-03    P   736.0  0.017120   770.375000   770.781862  0.040683  0.009843    0.295  0.198458   batch       
+7903  2026-10-28    SPY  2026-11-30    P   597.0  0.091093   770.375000   772.545801  0.040734  0.009843    0.465  0.399306   batch  stale
+```
+
+Flags, IV ranges and the `^SPX` method split by |k| and by T:
+
+```
+FLAGS
+ticker  flag 
+^SPX             5888
+        stale     953
+SPY              3104
+        stale     427
+AAPL              455
+        stale       6
+IV RANGE
+         count      mean       std       min       25%       50%       75%       max
+ticker                                                                              
+^SPX    6841.0  0.216246  0.112944  0.104983  0.137752  0.178634  0.251992  0.905826
+SPY     3531.0  0.241129  0.136861  0.109512  0.139749  0.191820  0.293476  0.868181
+AAPL     461.0  0.303129  0.063255  0.220411  0.246328  0.293180  0.341111  0.520279
+SPX METHOD BY |k|
+method          brent  newton
+absk_bin                     
+(-0.001, 0.02]    120    1345
+(0.02, 0.05]      888     752
+(0.05, 0.1]      1235     308
+(0.1, 0.25]      1538      68
+(0.25, inf]       587       0
+SPX METHOD BY T
+method            brent  newton
+T_bin                          
+(-0.001, 0.0192]    621     149
+(0.0192, 0.0822]   1563     863
+(0.0822, 1.0]      2184    1461
+```
+
+64% of `^SPX` rows fall back to Brent. The share rises with distance from the money: 8% within |k| ≤ 0.02, and all rows beyond 0.25. The Brenner-Subrahmanyam start is an ATM approximation, so far from the money Newton from it leaves [`iv_lo`, `iv_hi`] or meets vega below `min_vega` × F × D, and the Section 5.3 switch to Brent applies. No OTM row on the fixture is `bounds`, `no_root` or `flat`.
+
+A second run of the `iv` stage leaves `git status` clean, so `iv_summary.csv` and `parity_forwards_fixture.csv` are byte-identical across 2 runs.
+
+### 3b-D6. Tests, fresh-clone check and CI
+
+`.venv/Scripts/pytest -p socket --disable-socket -q` on Windows at `75ec927`: `4488 passed, 5 warnings in 338.37s (0:05:38)`. `ruff check .`: `All checks passed!`
+
+New tests: `tests/test_iv.py` (`test_european_roundtrip_grid`, `test_american_roundtrip_grid`, `test_flat_rule`, `test_bounds_flagged`, `test_brent_fallback_7d_30pct_otm_put`, `test_batch_matches_scalar_on_200_fixture_rows`, `test_batch_timing_fixture_american_otm`, `test_american_n200_vs_n2000_measure`) and `tests/test_iv_chain.py` (`test_iv_chain_schema`, `test_iv_chain_spx_uses_european_and_others_american`, `test_iv_chain_parity_fail_expiry_flagged_without_vol`). What they print:
+
+```
+test_european_roundtrip_grid: {'bounds': 6, 'flat': 28, 'brent': 102, 'newton': 116}
+test_american_roundtrip_grid: {'flat': 33, 'no_root': 5, 'brent': 206, 'bounds': 8}
+test_brent_fallback_7d_30pct_otm_put: sens = 0.00167275
+test_batch_matches_scalar_on_200_fixture_rows: statuses {'batch': 194, 'no_root': 6}; largest gap 2.89e-10, median 1.51e-10
+test_batch_timing_fixture_american_otm: batch on 3992 fixture American OTM rows: 38.8 s; {'batch': 3992}
+test_american_n200_vs_n2000_measure: N = 200 against N = 2000: 3992 rows, 6 Newton iterations, largest gap 0.00335205, median 0.000151423, unconverged 0
+```
+
+The Brent fallback test uses σ = 1.0 on the 7-day put with K = 0.7 F: sens = 0.00167, at least 1e-3.
+
+Fresh clone into `C:\Users\astha\AppData\Local\Temp\vs3b` from GitHub after the push of `75ec927`, with the same commands as above (`git clone`, `uv venv --python 3.12`, `uv pip install -r requirements-lock.txt`, `uv pip install -e . --no-deps`). The progress lines are left out:
+
+```
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:894
+  C:\Users\astha\AppData\Local\Temp\vs3b\.venv\Lib\site-packages\_pytest\config\__init__.py:894: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; socket
+    self.import_plugin(arg, consider_entry_points=True)
+
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+  C:\Users\astha\AppData\Local\Temp\vs3b\.venv\Lib\site-packages\pandas\core\series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+4488 passed, 5 warnings in 443.20s (0:07:23)
+exit=0
+```
+
+CI (`ci` workflow) on `75ec927`: success, run 40910469696.
+
+### 3b runtime per step
+
+- 3.2: `tests/test_iv.py` takes about 3 to 4 minutes, mostly the N = 2000 measurement (6 passes of a 2000-step tree over 3,992 rows, about 40 s each) and the 38.8 s batch timing test.
+- 3.3: the `iv` stage takes 135 s on the fixture day (the batch solve on 3,992 OTM rows and the 6,841 `^SPX` European solves).
+- Full suite: 338 s on Windows and 443 s in the fresh clone, against 106 s before Section 3b.
+
+### 3b deviations from PLAN.md
+
+1. **The round-trip tests** follow instruction 03b part B (a vol within `iv_roundtrip`, or no vol with status `flat`, `no_root` or `bounds`), not PLAN 3.2. Each runs as 1 test over the 252 cases and prints the status counts, so a failure lists every case that failed.
+2. **Methods** add `batch`, `no_root` and `flat` to PLAN's `newton`, `brent` and `bounds` (instruction 03b). The scalar American solver reports `brent`.
+3. **Helpers beyond Section 6.1** (O-1 (a)), all in `volsurf/iv.py`: `crr_batch`, `iv_american_batch`, `iv_american_refine` (for the MEASURE only), `iv_inputs` (adds T, S, r, q, F, D, mid and parity_fail to a clean chain, since `iv_chain(clean, cfg)` has no other inputs) and `iv_summary`.
+4. **`test_iv_chain.py`** runs on each fixture ticker's first 2 expiries, to keep it quick. The full fixture day runs in the `iv` stage and in the batch timing and MEASURE tests.
+
+### 3b not verified
+
+- **The Brent tolerance `1e-14` and the bump `0.01`** are literals in `volsurf/iv.py` (`BRENT_TOL`, `FLAT_BUMP`), each with a comment citing instruction 03b part B, under the rule 6 exception for constants written in an instruction file. Neither is in `config.toml`.
+- **The bisection midpoint** is returned as the batch vol, and a row whose price at `iv_lo` equals the mid exactly takes `iv_lo` as its root, as `brentq` does. The batch flat rule is evaluated on the same 200-step batch tree.
+- **Newton in `iv_european`** starts only when the Brenner-Subrahmanyam start lies in [`iv_lo`, `iv_hi`]. A start outside the range is treated as Newton leaving the range, so Brent runs. Newton that does not converge within `newton_max_iter` also hands over to Brent.
+- **`price_bounds`** broadcasts, and returns a bool for scalar input.
+- **`iv_chain` row order** follows the clean chain (ticker, then expiry, kind and strike as captured). `flag` joins `stale`, `after_close` and `parity_fail` in that order, and `method` is blank on `parity_fail` rows.
+- **`n_in`** counts the rows of the IV table, which are the OTM rows plus every row of a `parity_fail` expiry. `n_solved` counts the rows with a vol.
+
+### 3b open questions
+
+None new. The batch edge case in 3b-D1 is reported, not decided: the flat rule could be made to require low sensitivity on either side of σ̂, if the reviewer wants batch and scalar to agree on synthetic ITM cases too.
