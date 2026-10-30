@@ -68,6 +68,7 @@ bl_dk = 0.001
 int_tol = 1e-3
 moves = [0.025, 0.05, 0.10, 0.20]
 k_sd = 24
+int_points = 200001
 
 [events]
 min_n = 20

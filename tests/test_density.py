@@ -1,0 +1,112 @@
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+from scipy.integrate import cumulative_trapezoid
+
+from volsurf.config import load_config
+from volsurf.density import (
+    density_check,
+    density_k,
+    fd_density,
+    k_grid,
+    prob_above,
+    prob_below,
+    svi_density,
+    tail_table,
+)
+from volsurf.svi import ACCEPTED, PARAMS, svi_g
+
+ROOT = Path(__file__).resolve().parents[1]
+CFG = load_config(ROOT / "config.toml")
+TRUE = (0.02, 0.15, -0.4, 0.05, 0.2)
+VOGT = (-0.0410, 0.1331, 0.3060, 0.3586, 0.4153)  # Gatheral and Jacquier 2014, Section 5.1: fails butterfly
+
+
+@pytest.fixture(scope="module")
+def accepted(fixture_fits) -> pd.DataFrame:
+    """Accepted fixture slices with their density integral and mean checks (instruction 05 part C)."""
+    acc = fixture_fits[fixture_fits["status"].isin(ACCEPTED)].reset_index(drop=True)
+    checks = pd.DataFrame([density_check(p, F, CFG) for p, F in
+                           zip(acc[PARAMS].itertuples(index=False), acc["F"], strict=True)])
+    return pd.concat([acc[["ticker", "expiry", "T", "F", "r", "k_min", "k_max", *PARAMS]], checks], axis=1)
+
+
+def test_integrates_to_one(accepted):
+    print(accepted[["ticker", "expiry", "T", "L", "integral", "int_err"]].to_string())
+    err = accepted["int_err"].abs()
+    print(err.groupby(accepted["ticker"], sort=False).agg(["max", "median"]).to_string())
+    assert (err <= CFG.density.int_tol).all()
+
+
+def test_mean_equals_forward(accepted):
+    print(accepted[["ticker", "expiry", "T", "F", "mean", "mean_rel_err"]].to_string())
+    err = accepted["mean_rel_err"].abs()
+    print(err.groupby(accepted["ticker"], sort=False).agg(["max", "median"]).to_string())
+    assert (err <= CFG.density.int_tol).all()
+
+
+def test_nonnegative_when_butterfly_passes(accepted):
+    # the density is g times a positive factor, so q >= 0 wherever g >= 0; every accepted slice passed the
+    # butterfly check, and on the integration grid g stays at or above the same -1e-10
+    min_g = [float(svi_g(k_grid(p, CFG.density.k_sd, CFG.density.int_points), p).min())
+             for p in accepted[PARAMS].itertuples(index=False)]
+    print(pd.DataFrame({"ticker": accepted["ticker"], "expiry": accepted["expiry"], "min_g_int": min_g,
+                        "min_density": accepted["min_density"]}).to_string())
+    assert min(min_g) >= -1e-10
+    assert (accepted["min_density"] >= 0).all()
+    k = k_grid(VOGT, CFG.density.k_sd, CFG.density.int_points)
+    assert density_k(k, VOGT).min() < 0  # a slice that fails the butterfly check has a negative density
+    assert density_k(k_grid(TRUE, CFG.density.k_sd, CFG.density.int_points), TRUE).min() >= 0
+
+
+def test_svi_density_is_p_k_over_k():
+    F, K = 100.0, np.linspace(60.0, 150.0, 7)
+    np.testing.assert_allclose(svi_density(K, F, 0.5, TRUE), density_k(np.log(K / F), TRUE) / K, rtol=1e-15)
+
+
+def test_prob_above_matches_integrated_density():
+    # O-35 (a): the closed-form P(S_T > x) is the integral of the density; against a cumulative trapezoid integral
+    k = k_grid(TRUE, CFG.density.k_sd, CFG.density.int_points)
+    cdf = cumulative_trapezoid(density_k(k, TRUE), k, initial=0.0)
+    F = 100.0
+    x = F * np.exp(k[::20000])
+    gap = np.abs(prob_below(x, F, TRUE) - cdf[::20000]).max()
+    print(f"largest |closed form - trapezoid| {gap:.3g}")
+    assert gap <= CFG.density.int_tol
+    np.testing.assert_allclose(prob_above(x, F, TRUE) + prob_below(x, F, TRUE), 1.0, rtol=0, atol=1e-15)
+
+
+def test_analytic_vs_fd_measure(accepted):
+    # MEASURE (instruction 05 part C): analytic density against e^(rT) d2C/dK2 with step bl_dk x F, on 2,001 strikes
+    # over each accepted fixture slice's quoted range; gaps absolute and relative to the slice's peak density
+    rows = []
+    for r in accepted.itertuples():
+        p = tuple(getattr(r, c) for c in PARAMS)
+        K = r.F * np.exp(np.linspace(r.k_min, r.k_max, 2001))
+        q = svi_density(K, r.F, r.T, p)
+        q_fd = fd_density(K, r.F, r.T, np.exp(-r.r * r.T), p, CFG.density.bl_dk * r.F)
+        gap = np.abs(q - q_fd)
+        i = int(np.argmax(gap))
+        rows.append({"ticker": r.ticker, "expiry": r.expiry, "T": r.T, "max_abs_gap": gap[i], "K_at_max": K[i],
+                     "q_at_max": q[i], "max_rel_gap_to_peak": gap.max() / q.max()})
+    table = pd.DataFrame(rows)
+    print(table.to_string())
+    worst = table.loc[table["max_abs_gap"].idxmax()]
+    print(f"MEASURE largest |q - q_fd| {worst['max_abs_gap']!r} ({worst['ticker']} {worst['expiry']}); "
+          f"largest gap relative to peak density {table['max_rel_gap_to_peak'].max()!r}")
+    assert np.isfinite(table[["max_abs_gap", "max_rel_gap_to_peak"]].to_numpy()).all()
+
+
+def test_tail_table_extrapolated_flag():
+    F, k_range = 100.0, (-0.06, 0.04)  # quotes from K = 94.18 to 104.08
+    table = tail_table(TRUE, F, 0.5, k_range, CFG.density.moves)
+    print(table.to_string())
+    assert list(table.columns) == ["measure", "move", "x", "prob", "extrapolated"]
+    assert len(table) == 5 * len(CFG.density.moves)
+    flag = table.set_index(["measure", "move"])["extrapolated"]
+    assert not flag[("below", -0.025)] and not flag[("above", 0.025)] and not flag[("abs_log", 0.025)]
+    assert not flag[("below", -0.05)] and flag[("above", 0.05)] and flag[("abs_log", 0.05)]  # 105 > 104.08
+    assert flag[("below", -0.10)] and flag[("above", 0.20)]
+    assert table["prob"].between(0, 1).all()
