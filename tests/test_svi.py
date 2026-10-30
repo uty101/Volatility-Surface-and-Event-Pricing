@@ -10,11 +10,11 @@ from volsurf.svi import (
     PARAMS,
     butterfly_grid,
     calendar_violations,
+    check_grid,
     fit_svi,
     neighbour_starts,
     svi_g,
     svi_w,
-    wide_grid,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,33 +86,54 @@ def test_fixture_accepted_slices(fixture_fits):
     share["share"] = share["accepted"] / share["fitted"]
     print(share.to_string())
     print(table.loc[table["status"] != "ok", ["ticker", "expiry", "T", "n_quotes", "refit", "exit", "route",
-                                              "rmse_volpts", "min_g", "status"]].to_string())
+                                              "cut_rounds", "rmse_volpts", "min_g", "status"]].to_string())
     assert set(share.index) == {SPX, "SPY", "AAPL"}
     assert (share["share"] >= CFG.svi.min_accept_share).all(), share
 
 
 def test_fixture_accepted_wing_and_wide_grid(fixture_fits):
-    # instruction 05 step 5.0 item 2: every accepted fixture slice has b (1 + |rho|) <= 2 and min g >= -1e-10 on
-    # the wide grid
+    # instruction 05 step 5.0 item 2, with instruction 05b part B: every accepted fixture slice has b (1 + |rho|) <= 2
+    # (and <= wing_max = 1.98) and min g >= -1e-10 on the acceptance grid (the 200,001-point sinh grid)
     acc = fixture_fits[fixture_fits["status"].isin(ACCEPTED)].copy()
     acc["wing"] = acc["b"] * (1 + acc["rho"].abs())
-    acc["min_g_wide"] = [float(svi_g(wide_grid(np.array([r.k_min, r.k_max]), p, CFG), p).min())
-                         for r, p in zip(acc.itertuples(), acc[PARAMS].itertuples(index=False), strict=True)]
-    print(acc[["ticker", "expiry", "T", "wing", "min_g_wide", "route"]].to_string())
-    print(f"largest wing {acc['wing'].max()!r}, smallest min g {acc['min_g_wide'].min()!r}")
-    assert (acc["wing"] <= 2.0).all()
-    assert (acc["min_g_wide"] >= -1e-10).all()
+    acc["min_g_check"] = [float(svi_g(check_grid(p, CFG, CFG.density.int_points), p).min())
+                          for p in acc[PARAMS].itertuples(index=False)]
+    print(acc[["ticker", "expiry", "T", "wing", "min_g_check", "route", "cut_rounds"]].to_string())
+    print(f"largest wing {acc['wing'].max()!r}, smallest min g {acc['min_g_check'].min()!r}")
+    assert (acc["wing"] <= 2.0).all() and (acc["wing"] <= CFG.svi.wing_max).all()
+    assert (acc["min_g_check"] >= -1e-10).all()
 
 
-def test_wide_grid_span():
-    # instruction 05 correction 2: [min(k_min - 0.5, -L), max(k_max + 0.5, L)], L = k_sd sqrt(w(0)), 801 points
-    k = np.array([-0.3, 0.1])
-    L = CFG.density.k_sd * np.sqrt(svi_w(0.0, *TRUE))
-    grid = wide_grid(k, TRUE, CFG)
+def test_check_grid_sinh_span():
+    # instruction 05b B1: k = m + s sinh(u), u evenly spaced, over [-k_check, k_check]; s floored at s_min
+    a, b, rho, m, s = TRUE
+    grid = check_grid(TRUE, CFG, CFG.svi.grid_points)
     assert len(grid) == CFG.svi.grid_points == 801
-    assert grid[0] == min(-0.8, -L) and grid[-1] == max(0.6, L)
-    tiny = (1e-6, 0.001, -0.4, 0.0, 0.01)  # sqrt(w(0)) so small that the padded quoted range is wider
-    assert list(wide_grid(k, tiny, CFG)[[0, -1]]) == [-0.8, 0.6]
+    np.testing.assert_allclose(grid[[0, -1]], [-CFG.svi.k_check, CFG.svi.k_check], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(np.diff(np.arcsinh((grid - m) / s)), np.diff(np.arcsinh((grid - m) / s))[0], rtol=1e-9)
+    step = np.diff(grid)
+    assert step[np.argmin(np.abs(grid[:-1] - m))] < step[0] / 20  # dense near m (0.0023 against 0.115 at the ends)
+    floored = check_grid((a, b, rho, m, 0.0), CFG, 5)
+    np.testing.assert_allclose(floored, m + CFG.svi.s_min * np.sinh(
+        np.linspace(np.arcsinh((-10 - m) / 1e-4), np.arcsinh((10 - m) / 1e-4), 5)), rtol=1e-15)
+
+
+def test_qqq_short_slice_never_accepted_with_negative_g():
+    # instruction 05b step 5b.1: QQQ 2026-11-03 on 2026-10-29 (g = -1.19 at k = -0.94 in session 5) is either
+    # accepted with min g >= -1e-10 or rejected; checked on the acceptance grid and on a uniform grid of 2,000,001
+    # points over [-10, 10]
+    q = pd.read_csv(ROOT / "tests" / "fixtures" / "qqq_2026-11-03_iv.csv")
+    fit = fit_svi(np.log(q["strike"] / q["F"]), q["iv"], float(q["T"].iloc[0]), CFG)
+    print({k: fit[k] for k in ("status", "route", "exit", "rmse_volpts", "min_g", "cut_rounds", "params")})
+    if fit["status"] in ACCEPTED:
+        dense = np.linspace(-CFG.svi.k_check, CFG.svi.k_check, 2_000_001)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            g = np.concatenate([svi_g(dense, fit["params"]),
+                                svi_g(check_grid(fit["params"], CFG, CFG.density.int_points), fit["params"])])
+        print(f"smallest g on the 2 grids {np.nanmin(g)!r}")
+        assert np.isfinite(g).all() and g.min() >= -1e-10 and fit["min_g"] >= -1e-10
+    else:
+        assert fit["status"] in ("poor_fit", "butterfly_fail")
 
 
 def test_neighbour_starts_scale_a_and_b():

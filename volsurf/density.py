@@ -1,9 +1,11 @@
-"""Risk-neutral density from an SVI slice (PLAN 5.1 and 5.2, kickoff Section 5.6, instruction 05 part C).
+"""Risk-neutral density from an SVI slice (PLAN 5.1 and 5.2, kickoff Section 5.6, instructions 05 and 05b).
 
 Tail probabilities and PIT values use the SVI slice's closed-form distribution function (O-35 (a)):
 P(S_T > K) = N(d-) - phi(d-) w'(k) / (2 sqrt(w(k))), which is -(1/D) dC/dK of the Black price on the slice, so it is
 the exact integral of `svi_density` from K to infinity. Tail rows are flagged `extrapolated` when a level lies
-outside [K_min, K_max] of the quotes used (kickoff Correction 11).
+outside [K_min, K_max] of the quotes used (kickoff Correction 11). The integral checks run on the slice's sinh grid
+over [-K, K], K = `[svi] k_check`, with the closed-form mass beyond +-K added (instruction 05b B4); a slice that misses
+`int_tol` has density status `density_fail` (O-36 (a), instruction 05b part C).
 """
 
 from __future__ import annotations
@@ -14,11 +16,11 @@ from scipy.integrate import trapezoid
 from scipy.stats import norm
 
 from volsurf.pricing import black76
-from volsurf.svi import svi_g, svi_w, svi_w1
+from volsurf.svi import check_grid, svi_g, svi_w, svi_w1
 
 TAIL_COLUMNS = ["measure", "move", "x", "prob", "extrapolated"]
-CHECK_COLUMNS = ["day", "ticker", "expiry", "T", "F", "L", "integral", "int_err", "mean", "mean_rel_err",
-                 "min_density"]
+CHECK_COLUMNS = ["day", "ticker", "expiry", "T", "F", "integral", "int_err", "tail_mass", "mean", "mean_rel_err",
+                 "min_g", "min_density", "density_status"]
 
 
 def _d_minus(k, w):
@@ -66,21 +68,24 @@ def prob_below(x, F, params) -> np.ndarray:
     return norm.cdf(-dm) + norm.pdf(dm) * svi_w1(k, params) / (2 * np.sqrt(w))
 
 
-def k_grid(params, k_sd: float, n_points: int) -> np.ndarray:
-    """Instruction 05 part C integration grid: n_points in k over [-L, L], L = k_sd x sqrt(w(0))."""
-    L = k_sd * np.sqrt(float(svi_w(0.0, *params)))
-    return np.linspace(-L, L, n_points)
+def k_grid(params, cfg) -> np.ndarray:
+    """Instruction 05b B4 integration grid: the slice's `[density] int_points`-point sinh grid over [-K, K]."""
+    return check_grid(params, cfg, cfg.density.int_points)
 
 
 def density_check(params, F, cfg) -> dict:
-    """Trapezoid integrals of the density over [F e^(-L), F e^(L)] on `[density] int_points` points in k
-    (instruction 05 part C): integral of q dK and of K q dK (as p_k dk and F e^k p_k dk), their errors against 1 and
-    F (relative), and the smallest density on the grid."""
-    k = k_grid(params, cfg.density.k_sd, cfg.density.int_points)
+    """Instruction 05b B4: trapezoid integrals of the density on the sinh grid over [F e^(-K), F e^(K)], as p_k dk
+    and F e^k p_k dk; the integral adds the closed-form mass beyond +-K, tail_mass = P(S_T < F e^(-K)) +
+    P(S_T > F e^(K)). Errors against 1 and F (relative), the smallest g and density on the grid, and
+    density_status `ok` or `density_fail` (either error above `int_tol`; O-36 (a))."""
+    k = k_grid(params, cfg)
     p = density_k(k, params)
-    integral, mean = float(trapezoid(p, k)), float(trapezoid(F * np.exp(k) * p, k))
-    return {"L": float(k[-1]), "integral": integral, "int_err": integral - 1, "mean": mean,
-            "mean_rel_err": mean / F - 1, "min_density": float(p.min())}
+    tail = float(prob_below(F * np.exp(k[0]), F, params) + prob_above(F * np.exp(k[-1]), F, params))
+    integral, mean = float(trapezoid(p, k)) + tail, float(trapezoid(F * np.exp(k) * p, k))
+    out = {"integral": integral, "int_err": integral - 1, "tail_mass": tail, "mean": mean,
+           "mean_rel_err": mean / F - 1, "min_g": float(svi_g(k, params).min()), "min_density": float(p.min())}
+    ok = abs(out["int_err"]) <= cfg.density.int_tol and abs(out["mean_rel_err"]) <= cfg.density.int_tol
+    return out | {"density_status": "ok" if ok else "density_fail"}
 
 
 def tail_table(params, F, T, k_range, moves) -> pd.DataFrame:

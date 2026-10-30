@@ -28,7 +28,7 @@ from volsurf.svi import (
 )
 
 SVI_FITS_COLUMNS = ["day", "ticker", "expiry", "T", "n_quotes", "a", "b", "rho", "m", "s", "rmse_vol", "min_g",
-                    "status", "refit", "rmse_volpts", "exit", "route"]
+                    "status", "refit", "rmse_volpts", "exit", "route", "cut_rounds"]
 SURFACE_COLUMNS = ["day", "ticker", "atm_30", "rr25_30", "ssvi_rr25_30", "bf25_30", "atm_90", "term_slope", "ssvi_rho",
                    "ssvi_eta", "ssvi_gamma", "ssvi_rmse", "n_expiries", "status"]
 METRICS = ["atm_30", "rr25_30", "bf25_30", "atm_90", "term_slope"]
@@ -231,7 +231,8 @@ def surface_day(iv: pd.DataFrame, cfg) -> dict[str, pd.DataFrame]:
             row = {"day": day, "ticker": ticker, "expiry": q["expiry"], "T": q["T"], "n_quotes": fit["n_quotes"]}
             row.update({p: (v if ok else np.nan) for p, v in zip(PARAMS, fit["params"], strict=True)})
             row.update(rmse_vol=fit["rmse_vol"], min_g=fit["min_g"], status=fit["status"], refit=fit["refit"],
-                       rmse_volpts=fit["rmse_volpts"], exit=fit["exit"], route=fit["route"])
+                       rmse_volpts=fit["rmse_volpts"], exit=fit["exit"], route=fit["route"],
+                       cut_rounds=fit["cut_rounds"])
             fits.append(row)
             if ok:
                 accepted.append({"day": day, "ticker": ticker, "expiry": q["expiry"], "T": q["T"],

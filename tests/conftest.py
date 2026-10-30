@@ -62,7 +62,7 @@ def fixture_iv() -> pd.DataFrame:
 @pytest.fixture(scope="session")
 def fixture_fits(fixture_iv) -> pd.DataFrame:
     """Every fixture slice fitted per ticker with `fit_expiries` (instruction 05 correction 3): one row per (ticker,
-    expiry) with T, F, r, k_min, k_max, n_quotes, params, rmse_volpts, min_g, refit, exit, route and status."""
+    expiry) with T, F, r, k_min, k_max, n_quotes, params, rmse_volpts, min_g, refit, exit, route, cut_rounds and status."""
     from volsurf.config import load_config
     from volsurf.svi import PARAMS, fit_expiries
 
@@ -76,5 +76,5 @@ def fixture_fits(fixture_iv) -> pd.DataFrame:
                          "k_min": q["k"].min(), "k_max": q["k"].max(), "n_quotes": fit["n_quotes"],
                          **dict(zip(PARAMS, fit["params"], strict=True)), "rmse_volpts": fit["rmse_volpts"],
                          "min_g": fit["min_g"], "refit": fit["refit"], "exit": fit["exit"], "route": fit["route"],
-                         "status": fit["status"]})
+                         "cut_rounds": fit["cut_rounds"], "status": fit["status"]})
     return pd.DataFrame(rows)
