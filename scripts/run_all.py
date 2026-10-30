@@ -263,7 +263,7 @@ def fig_metrics(surface: pd.DataFrame) -> Path:
         ax.grid(alpha=0.3)
         ax.set_xticks(x, s["day"], rotation=30, fontsize=8)
         ax.set_xlim(-0.5, len(s) - 0.5)
-    fig.suptitle(f"^SPX surface metrics from SSVI, {len(s)} captured day(s)")
+    fig.suptitle(f"^SPX surface metrics from the accepted SVI slices, {len(s)} captured day(s)")
     fig.tight_layout()
     return _save(fig, FIGURES / "spx_metrics.png")
 
@@ -284,11 +284,14 @@ def stage_surface(cfg) -> Path:
         accepted=lambda st: int(st.isin(ACCEPTED).sum()), fitted="size")
     share["share"] = share["accepted"] / share["fitted"]
     print(share.to_string())
+    print(pd.crosstab([fits["day"], fits["ticker"]], [fits["status"], fits["route"]]).to_string())
     print(surface.to_string())
     fs = surface[surface["day"] == FIXTURE_DAY.isoformat()]
     print("SSVI RMSE (vol points), fixture day:",
           dict(zip(fs["ticker"], (fs["ssvi_rmse"] * 100).round(4), strict=True)))
-    print(tables["calendar"].groupby(["day", "ticker"], sort=False)["violated"].agg(["size", "sum"]).to_string())
+    cal = tables["calendar"]
+    print(cal.groupby(["day", "ticker"], sort=False)["violated"].agg(["size", "sum"]).to_string())
+    print(cal.groupby("day")["violated"].agg(["size", "sum"]).to_string())
     for day in dict.fromkeys([days[0].isoformat(), days[-1].isoformat()]):
         fig_smiles(fits, day)
     fig_smile_fits(fits, ivs[0], FIXTURE_DAY.isoformat())

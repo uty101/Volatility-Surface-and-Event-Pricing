@@ -7,3 +7,15 @@ One line per item: the choice made and the reviewer's reason where one was given
 - **The fixture gate.** The 3 fixed counts are replaced by a share: for each fixture ticker, accepted slices ÷ slices with at least `min_quotes` quotes ≥ `[svi] min_accept_share` = 0.75, with the counts and shares printed on every run. Reason: it holds across platforms.
 - **O-31.** (a).
 - **Status 5 (interpretations).** All accepted, including the lowest objective over all starts for the first fit, and k ∈ [−2, 2] in `test_recovers_known_params`.
+
+## Session 4b
+
+Decisions from instruction 05 part A. Section 4 is approved, with the fixes in step 5.0.
+
+- **O-33.** (a), scipy's default SLSQP settings for SSVI.
+- **Status 2 (γ on its bound, SSVI RMSE 2.6 to 3.5 vol points).** A real model limit that biases the daily metrics. Fixed in step 5.0 item 3: SURFACE_DAILY metrics come from the accepted SVI slices, and SSVI's 25-delta risk reversal is kept beside them as `ssvi_rr25_30`.
+- **Status 3 (calendar violations).** Checked only where both slices have quotes (step 5.0 item 4).
+- **Status 4.** Noted.
+- **Status 5 (NFLX `no_root`).** Correct as is. NFLX lists strikes up to 2,660 against a spot of 62 (legacy listings), and a 0.015 mid that far out needs a vol above `iv_hi`. No change.
+- **Status 6.** All interpretations accepted.
+- **Status 8.** The owner may delete `C:\vs4` and `C:\vs4b`; Claude Code does not.

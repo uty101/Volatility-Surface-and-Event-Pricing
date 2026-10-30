@@ -1,7 +1,11 @@
 """SSVI across expiries and the daily surface run (PLAN 4.2 and 4.3, kickoff Section 5.5, O-10 (a), instruction 04).
 
-SURFACE_DAILY statuses (O-9 (a), instruction 04 step 4.2): `ok`, `too_few_expiries` (fewer than 3 accepted SVI
-slices) and `ssvi_fail` (SLSQP did not converge); both failures keep the row with blank metrics (Convention 4.15).
+SURFACE_DAILY metrics come from the accepted SVI slices (instruction 05 correction 4); SSVI gives ssvi_rho, ssvi_eta,
+ssvi_gamma, ssvi_rmse and the check column ssvi_rr25_30. Statuses (O-9 (a), instruction 04 step 4.2, instruction 05):
+`ok`, `too_few_expiries` (fewer than 3 accepted SVI slices, SSVI blank), `ssvi_fail` (SLSQP did not converge, SSVI
+blank), `no_bracket` (no 2 accepted slices bracket a tenor) and `delta_outside_quotes` (a 25-delta strike has no root
+inside a bracketing slice's quoted k range); each failure blanks only the values it affects (Convention 4.15), and
+several are joined with `|` (O-34 (a)).
 """
 
 from __future__ import annotations
@@ -19,14 +23,15 @@ from volsurf.svi import (
     W_FLOOR,
     butterfly_grid,
     calendar_violations,
-    fit_svi,
+    fit_expiries,
     svi_w,
 )
 
 SVI_FITS_COLUMNS = ["day", "ticker", "expiry", "T", "n_quotes", "a", "b", "rho", "m", "s", "rmse_vol", "min_g",
-                    "status", "refit", "rmse_volpts", "exit"]
-SURFACE_COLUMNS = ["day", "ticker", "atm_30", "rr25_30", "bf25_30", "atm_90", "term_slope", "ssvi_rho", "ssvi_eta",
-                   "ssvi_gamma", "ssvi_rmse", "n_expiries", "status"]
+                    "status", "refit", "rmse_volpts", "exit", "route"]
+SURFACE_COLUMNS = ["day", "ticker", "atm_30", "rr25_30", "ssvi_rr25_30", "bf25_30", "atm_90", "term_slope", "ssvi_rho",
+                   "ssvi_eta", "ssvi_gamma", "ssvi_rmse", "n_expiries", "status"]
+METRICS = ["atm_30", "rr25_30", "bf25_30", "atm_90", "term_slope"]
 THETA_COLUMNS = ["day", "ticker", "expiry", "theta_svi", "theta_used", "theta_capped"]
 MIN_EXPIRIES = 3  # instruction 04 step 4.2: fewer than 3 accepted slices gives too_few_expiries
 START = (-0.5, 1.0, 0.5)  # O-10 (a): SLSQP from 1 start (rho, eta, gamma)
@@ -136,31 +141,104 @@ def surface_metrics(fit: dict, cfg) -> dict:
     return row
 
 
+def slice_delta_k(target: float, params, k_lo: float, k_hi: float) -> float:
+    """Instruction 05 correction 4: the log-strike where the Black forward delta N(d1) of an SVI slice equals
+    `target` (a call delta; a put delta -x is the call delta 1 - x), d1 = -k / sqrt(w(k)) + sqrt(w(k)) / 2, by brentq
+    at the Section 3 Brent tolerances on the quoted range [k_lo, k_hi]; nan if no root lies inside it."""
+
+    def f(k):
+        sw = np.sqrt(max(float(svi_w(k, *params)), W_FLOOR))
+        return float(norm.cdf(-k / sw + sw / 2)) - target
+
+    f_lo, f_hi = f(k_lo), f(k_hi)
+    if f_lo == 0 or f_hi == 0:
+        return k_lo if f_lo == 0 else k_hi
+    if np.sign(f_lo) == np.sign(f_hi):
+        return np.nan
+    return brentq(f, k_lo, k_hi, xtol=BRENT_TOL, rtol=BRENT_TOL)
+
+
+def _bracket(tau: float, ordered: list[dict]) -> tuple[dict, dict] | None:
+    """The 2 accepted slices with T_1 <= tau <= T_2 (consecutive in T), or None (no extrapolation)."""
+    T = np.array([s["T"] for s in ordered])
+    if len(T) < 2 or not T[0] <= tau <= T[-1]:
+        return None
+    i = max(1, int(np.searchsorted(T, tau, side="left")))
+    return ordered[i - 1], ordered[i]
+
+
+def slice_metrics(slices: list[dict], cfg) -> tuple[dict, list[str]]:
+    """Instruction 05 correction 4: SURFACE_DAILY metrics from the accepted SVI slices (dicts with T, params, k_min,
+    k_max). ATM vol at tau = `[surface] tenors_days` / 365 is sqrt(theta(tau) / tau) by Convention 4.12 on the same
+    theta as SSVI (`_thetas`, `theta_at`). For the 30-day 25-delta vols, each bracketing slice's `[surface] delta`
+    call and put log-strikes come from `slice_delta_k`, total variance at the matched delta is linear in T between
+    the 2 slices, and sigma = sqrt(w / tau). RR = sigma_25c - sigma_25p, BF = (sigma_25c + sigma_25p)/2 - sigma_ATM,
+    term slope = ATM 90 - ATM 30. Returns the values (decimals, nan where blank) and the statuses met, in order."""
+    row, statuses = dict.fromkeys(METRICS, np.nan), []
+    ordered = sorted(slices, key=lambda s: s["T"])
+    thetas = _thetas(ordered) if ordered else None
+    t30, t90 = (d / 365 for d in cfg.surface.tenors_days)
+    for name, tau in (("30", t30), ("90", t90)):
+        pair = _bracket(tau, ordered)
+        if pair is None:
+            statuses.append("no_bracket")
+            continue
+        row[f"atm_{name}"] = float(np.sqrt(theta_at(tau, thetas) / tau))
+        if name != "30":
+            continue
+        (s1, s2), vol = pair, {}
+        x = (tau - s1["T"]) / (s2["T"] - s1["T"])
+        for side, target in (("c", cfg.surface.delta), ("p", 1 - cfg.surface.delta)):
+            w = [float(svi_w(slice_delta_k(target, s["params"], s["k_min"], s["k_max"]), *s["params"]))
+                 for s in (s1, s2)]
+            vol[side] = np.sqrt((w[0] + (w[1] - w[0]) * x) / tau)
+        if np.isnan(list(vol.values())).any():
+            statuses.append("delta_outside_quotes")
+            continue
+        row["rr25_30"] = float(vol["c"] - vol["p"])
+        row["bf25_30"] = float((vol["c"] + vol["p"]) / 2 - row["atm_30"])
+    row["term_slope"] = row["atm_90"] - row["atm_30"]
+    return row, statuses
+
+
+def surface_row(slices: list[dict], ssvi: dict, cfg) -> dict:
+    """One SURFACE_DAILY row without day and ticker: metrics from `slice_metrics`, SSVI parameters, RMSE and
+    ssvi_rr25_30 from `surface_metrics`, status `ok` or the distinct failures joined with `|` (O-34 (a))."""
+    metrics, statuses = slice_metrics(slices, cfg)
+    sv = surface_metrics(ssvi, cfg)
+    status = "|".join(dict.fromkeys(([] if ssvi["status"] == "ok" else [ssvi["status"]]) + statuses)) or "ok"
+    return {**metrics, "ssvi_rr25_30": sv["rr25_30"], **{c: sv[c] for c in SURFACE_COLUMNS[8:12]},
+            "n_expiries": len(slices), "status": status}
+
+
 def surface_day(iv: pd.DataFrame, cfg) -> dict[str, pd.DataFrame]:
-    """PLAN 4.3 for one day's IV table (O-1 (a) helper): SVI per (ticker, expiry) on the OTM rows with a vol,
-    SSVI per ticker on the accepted slices, calendar check per ticker on the union grid (O-31 (a)). Returns frames
-    svi_fits (SVI_FITS plus refit, rmse_volpts and exit; a to s blank unless accepted), surface (SURFACE_DAILY),
-    calendar and theta (ssvi_theta.csv), each in ticker order of first appearance and expiry order."""
+    """PLAN 4.3 for one day's IV table (O-1 (a) helper): SVI per (ticker, expiry) on the OTM rows with a vol by
+    `fit_expiries` (instruction 05 correction 3), SSVI per ticker on the accepted slices, SURFACE_DAILY by
+    `surface_row`, calendar check per ticker on the union grid (O-31 (a)) over each pair's quoted k overlap
+    (instruction 05 step 5.0 item 4). Returns frames svi_fits (SVI_FITS plus refit, rmse_volpts, exit and route; a to
+    s blank unless accepted), surface (SURFACE_DAILY with ssvi_rr25_30), calendar and theta (ssvi_theta.csv), each in
+    ticker order of first appearance and expiry order."""
     iv = iv[iv["iv"].notna()].copy()
     iv["k"] = np.log(iv["strike"] / iv["F"])
     fits, surface, calendar, theta = [], [], [], []
     for ticker, t_rows in iv.groupby("ticker", sort=False):
         day = t_rows["day"].iloc[0]
-        accepted, ks = [], []
-        for expiry, g in t_rows.groupby("expiry", sort=True):
-            T = float(g["T"].iloc[0])
-            fit = fit_svi(g["k"], g["iv"], T, cfg)
+        quotes = [{"expiry": e, "T": float(g["T"].iloc[0]), "k": g["k"].to_numpy(), "iv": g["iv"].to_numpy()}
+                  for e, g in t_rows.groupby("expiry", sort=True)]
+        accepted = []
+        for q, fit in zip(quotes, fit_expiries(quotes, cfg), strict=True):
             ok = fit["status"] in ACCEPTED
-            row = {"day": day, "ticker": ticker, "expiry": expiry, "T": T, "n_quotes": fit["n_quotes"]}
+            row = {"day": day, "ticker": ticker, "expiry": q["expiry"], "T": q["T"], "n_quotes": fit["n_quotes"]}
             row.update({p: (v if ok else np.nan) for p, v in zip(PARAMS, fit["params"], strict=True)})
             row.update(rmse_vol=fit["rmse_vol"], min_g=fit["min_g"], status=fit["status"], refit=fit["refit"],
-                       rmse_volpts=fit["rmse_volpts"], exit=fit["exit"])
+                       rmse_volpts=fit["rmse_volpts"], exit=fit["exit"], route=fit["route"])
             fits.append(row)
             if ok:
-                accepted.append({"day": day, "ticker": ticker, "expiry": expiry, "T": T, "params": fit["params"]})
-                ks.append(g["k"].to_numpy())
+                accepted.append({"day": day, "ticker": ticker, "expiry": q["expiry"], "T": q["T"],
+                                 "params": fit["params"], "k_min": float(q["k"].min()), "k_max": float(q["k"].max())})
+        ks = [q["k"] for q in quotes if q["expiry"] in {s["expiry"] for s in accepted}]
         ssvi = fit_ssvi(accepted, t_rows[t_rows["expiry"].isin([s["expiry"] for s in accepted])], cfg)
-        surface.append({"day": day, "ticker": ticker, **surface_metrics(ssvi, cfg)})
+        surface.append({"day": day, "ticker": ticker, **surface_row(accepted, ssvi, cfg)})
         if ssvi["thetas"] is not None:
             th = ssvi["thetas"].drop(columns="T")
             theta.append(th.assign(day=day, ticker=ticker)[THETA_COLUMNS])

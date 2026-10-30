@@ -48,7 +48,10 @@ def test_surface_run_fixture():
     print(surface.to_string())
     assert len(fits) == 18 and set(surface["ticker"]) == {"^SPX", "SPY", "AAPL"}
     assert fits["status"].isin(["ok", "ok_refit", "butterfly_fail", "poor_fit", "too_few"]).all()
-    assert surface["status"].isin(["ok", "too_few_expiries", "ssvi_fail"]).all()
+    statuses = {"too_few_expiries", "ssvi_fail", "no_bracket", "delta_outside_quotes"}  # instruction 05, O-34 (a)
+    assert all(s == "ok" or set(s.split("|")) <= statuses for s in surface["status"])
+    assert (fits["route"] == "").eq(fits["status"] == "too_few").all()
+    assert fits.loc[fits["status"] != "too_few", "route"].isin(["first", "refit", "neighbour"]).all()
     accepted = fits["status"].isin(["ok", "ok_refit"])
     assert fits.loc[accepted, ["a", "b", "rho", "m", "s"]].notna().all().all()
     assert fits.loc[~accepted, ["a", "b", "rho", "m", "s"]].isna().all().all()  # Convention 4.15

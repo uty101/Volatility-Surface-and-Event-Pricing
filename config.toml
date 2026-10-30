@@ -53,8 +53,10 @@ min_quotes = 8
 s_min = 1e-4
 max_rmse_volpts = 2.0
 min_accept_share = 0.75
+wing_max = 2.0
+neighbour_retries = 3
 starts = [[0.01, 0.1, -0.5, 0.0, 0.1], [0.01, 0.3, -0.8, 0.05, 0.2], [0.0, 0.05, 0.0, 0.0, 0.05], [0.02, 0.2, -0.3, -0.05, 0.3], [0.005, 0.5, -0.95, 0.1, 0.5]]
-grid_points = 401
+grid_points = 801
 grid_pad = 0.5
 
 [surface]
@@ -65,7 +67,7 @@ delta = 0.25
 bl_dk = 0.001
 int_tol = 1e-3
 moves = [0.025, 0.05, 0.10, 0.20]
-k_sd = 8
+k_sd = 24
 
 [events]
 min_n = 20

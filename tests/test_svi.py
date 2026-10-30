@@ -1,27 +1,24 @@
-from datetime import date
-from functools import cache
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from volsurf.config import load_config
-from volsurf.data import RATE_TENORS, SPX
-from volsurf.forwards import clean_with_forwards
-from volsurf.iv import iv_chain, iv_inputs
+from volsurf.data import SPX
 from volsurf.svi import (
     ACCEPTED,
     PARAMS,
     butterfly_grid,
     calendar_violations,
     fit_svi,
+    neighbour_starts,
     svi_g,
     svi_w,
+    wide_grid,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = load_config(ROOT / "config.toml")
-FIXTURE_DAY = date(2026, 10, 28)  # instruction 01d part B
 TRUE = (0.02, 0.15, -0.4, 0.05, 0.2)
 # Axel Vogt's raw SVI slice (Gatheral and Jacquier 2014, Section 5.1): negative density near the money
 VOGT = (-0.0410, 0.1331, 0.3060, 0.3586, 0.4153)
@@ -77,37 +74,73 @@ def test_too_few_status():
     assert np.isnan(fit["params"]).all() and np.isnan(fit["rmse_vol"])
 
 
-@cache
-def fixture_iv() -> pd.DataFrame:
-    """The fixture day's OTM IV table (PLAN 3.3), built from the committed fixture and data/raw."""
-    chains = pd.read_parquet(ROOT / "tests" / "fixtures" / "chains_sample.parquet")
-    underlying = pd.read_csv(ROOT / "tests" / "fixtures" / "underlying_sample.csv")
-    fred = {sid: pd.read_csv(ROOT / "data" / "raw" / "fred" / f"{sid}.csv") for sid in RATE_TENORS}
-    divs = pd.read_csv(ROOT / "data" / "raw" / "prices" / "dividends.csv")
-    clean, _, forwards = clean_with_forwards(chains, underlying, fred, FIXTURE_DAY, CFG)
-    return iv_chain(iv_inputs(clean, underlying, fred, divs, forwards, FIXTURE_DAY, CFG), CFG)
-
-
-def test_fixture_accepted_slices():
+def test_fixture_accepted_slices(fixture_fits):
     # instruction 04b part B: per fixture ticker, accepted (ok plus ok_refit) slices / slices with at least
-    # min_quotes quotes >= [svi] min_accept_share
-    iv = fixture_iv()
-    iv = iv[iv["iv"].notna()]
-    rows = []
-    for (ticker, expiry), g in iv.groupby(["ticker", "expiry"], sort=False):
-        fit = fit_svi(np.log(g["strike"] / g["F"]), g["iv"], g["T"].iloc[0], CFG)
-        rows.append({"ticker": ticker, "expiry": expiry, "T": g["T"].iloc[0], "n_quotes": fit["n_quotes"],
-                     **dict(zip(PARAMS, fit["params"], strict=True)), "rmse_volpts": fit["rmse_volpts"],
-                     "min_g": fit["min_g"], "refit": fit["refit"], "exit": fit["exit"], "status": fit["status"]})
-    table = pd.DataFrame(rows)
+    # min_quotes quotes >= [svi] min_accept_share; slices fitted per ticker with the neighbour retry (instruction 05)
+    table = fixture_fits
     print(table.to_string())
-    print(pd.crosstab(table["ticker"], table["status"]).to_string())
+    print(pd.crosstab(table["ticker"], [table["status"], table["route"]]).to_string())
     fitted = table[table["n_quotes"] >= CFG.svi.min_quotes]
     share = pd.DataFrame({"accepted": fitted["status"].isin(ACCEPTED).groupby(fitted["ticker"], sort=False).sum(),
                           "fitted": fitted.groupby("ticker", sort=False).size()})
     share["share"] = share["accepted"] / share["fitted"]
     print(share.to_string())
-    print(table.loc[table["status"] != "ok",
-                    ["ticker", "expiry", "T", "n_quotes", "refit", "exit", "rmse_volpts", "min_g", "status"]].to_string())
+    print(table.loc[table["status"] != "ok", ["ticker", "expiry", "T", "n_quotes", "refit", "exit", "route",
+                                              "rmse_volpts", "min_g", "status"]].to_string())
     assert set(share.index) == {SPX, "SPY", "AAPL"}
     assert (share["share"] >= CFG.svi.min_accept_share).all(), share
+
+
+def test_fixture_accepted_wing_and_wide_grid(fixture_fits):
+    # instruction 05 step 5.0 item 2: every accepted fixture slice has b (1 + |rho|) <= 2 and min g >= -1e-10 on
+    # the wide grid
+    acc = fixture_fits[fixture_fits["status"].isin(ACCEPTED)].copy()
+    acc["wing"] = acc["b"] * (1 + acc["rho"].abs())
+    acc["min_g_wide"] = [float(svi_g(wide_grid(np.array([r.k_min, r.k_max]), p, CFG), p).min())
+                         for r, p in zip(acc.itertuples(), acc[PARAMS].itertuples(index=False), strict=True)]
+    print(acc[["ticker", "expiry", "T", "wing", "min_g_wide", "route"]].to_string())
+    print(f"largest wing {acc['wing'].max()!r}, smallest min g {acc['min_g_wide'].min()!r}")
+    assert (acc["wing"] <= 2.0).all()
+    assert (acc["min_g_wide"] >= -1e-10).all()
+
+
+def test_wide_grid_span():
+    # instruction 05 correction 2: [min(k_min - 0.5, -L), max(k_max + 0.5, L)], L = k_sd sqrt(w(0)), 801 points
+    k = np.array([-0.3, 0.1])
+    L = CFG.density.k_sd * np.sqrt(svi_w(0.0, *TRUE))
+    grid = wide_grid(k, TRUE, CFG)
+    assert len(grid) == CFG.svi.grid_points == 801
+    assert grid[0] == min(-0.8, -L) and grid[-1] == max(0.6, L)
+    tiny = (1e-6, 0.001, -0.4, 0.0, 0.01)  # sqrt(w(0)) so small that the padded quoted range is wider
+    assert list(wide_grid(k, tiny, CFG)[[0, -1]]) == [-0.8, 0.6]
+
+
+def test_neighbour_starts_scale_a_and_b():
+    # instruction 05 correction 3: the 3 nearest accepted expiries, a and b scaled by T / T_neighbour
+    accepted = [(0.1, (0.01, 0.1, -0.5, 0.0, 0.1)), (0.2, (0.02, 0.2, -0.6, 0.01, 0.2)),
+                (0.4, (0.04, 0.3, -0.7, 0.02, 0.3)), (0.8, (0.08, 0.4, -0.8, 0.03, 0.4))]
+    starts = neighbour_starts(0.3, accepted, CFG.svi.neighbour_retries)
+    print(starts)
+    assert len(starts) == 3
+    np.testing.assert_allclose(starts[0], (0.03, 0.3, -0.6, 0.01, 0.2), rtol=1e-15)  # 0.2 and 0.4 tie: 0.2 first
+    np.testing.assert_allclose(starts[1], (0.03, 0.225, -0.7, 0.02, 0.3), rtol=1e-15)
+    np.testing.assert_allclose(starts[2], (0.03, 0.3, -0.5, 0.0, 0.1), rtol=1e-15)
+
+
+def test_calendar_only_inside_quoted_overlap():
+    # instruction 05 step 5.0 item 4: w_cross - w_near = 0.01 + 0.1 k crosses only on the put wing (k < -0.1); with
+    # quoted ranges that overlap only on k >= 0.1 the pair is not a violation, and over all of the grid it is
+    grid = np.linspace(-1.0, 1.0, CFG.svi.grid_points)
+    near = {"expiry": "near", "T": 0.25, "params": (0.01, 0.1, -0.5, 0.0, 0.1), "k_min": -0.5, "k_max": 0.5}
+    cross = {"expiry": "cross", "T": 0.5, "params": (0.02, 0.1, 0.5, 0.0, 0.1), "k_min": 0.1, "k_max": 0.9}
+    diff = svi_w(grid, *cross["params"]) - svi_w(grid, *near["params"])
+    assert (diff[grid >= 0.1] > 0).all() and (diff[grid < 0] < -1e-10).any()
+    row = calendar_violations([near, cross], grid).iloc[0]
+    print(row.to_string())
+    assert not row["violated"] and row["n_violations"] == 0
+    assert row["n_grid"] == int(((grid >= 0.1) & (grid <= 0.5)).sum())
+    disjoint = calendar_violations([near, {**cross, "k_min": 0.6}], grid).iloc[0]
+    assert disjoint["n_grid"] == 0 and not disjoint["violated"] and np.isnan(disjoint["min_diff"])
+    unbounded = calendar_violations([{k: v for k, v in s.items() if not k.startswith("k_")} for s in (near, cross)],
+                                    grid).iloc[0]
+    assert unbounded["violated"] and unbounded["n_grid"] == len(grid)
