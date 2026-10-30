@@ -38,7 +38,7 @@ The integral and mean checks hold on all 74 accepted fixture slices (largest err
 
 ## Tests
 
-`pytest -p socket --disable-socket -q`: `1 failed, 4515 passed` on Windows at `9acf0df` (31 min). The failure is `test_nonnegative_when_butterfly_passes`. `ruff check .`: `All checks passed!` The fresh-clone check and CI are in the review, D5 and Fresh-clone check.
+`pytest -p socket --disable-socket -q`: `1 failed, 4515 passed` on Windows at `9acf0df` (31 min). The failure is `test_nonnegative_when_butterfly_passes`. `ruff check .`: `All checks passed!` Fresh clone at `35d4f13` (Windows, `C:\vs5`): `1 failed, 4515 passed`, the same. **CI on `35d4f13` (run 41080293255, Linux): failure, `3 failed, 4513 passed`.** On Linux, `test_integrates_to_one` and `test_mean_equals_forward` fail too. The fixture `^SPX` 2026-11-05 slice fits differently there and integrates to 1.0038 with a mean 0.53% above F, which is cause 2 of the stop (review D5). `C:\vs5` is left on disk and is safe to delete.
 
 ## `git log origin/main --oneline -3` (before this commit)
 
