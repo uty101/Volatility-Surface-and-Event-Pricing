@@ -50,7 +50,7 @@ Apart from this, the instruction 05b fix does what it was meant to do (review 5b
 
 ## Tests
 
-`.venv\Scripts\python -m pytest -p socket --disable-socket -q`: `1 failed, 4517 passed` on Windows at `fb87ee9` (26 min). The failure is `test_nonnegative_when_butterfly_passes`. `ruff check .`: `All checks passed!` The fresh-clone check and CI follow in the commit `session 5b: fresh-clone check and CI`.
+`.venv\Scripts\python -m pytest -p socket --disable-socket -q`: `1 failed, 4517 passed` on Windows at `fb87ee9` (26 min). The failure is `test_nonnegative_when_butterfly_passes`. `ruff check .`: `All checks passed!` Fresh clone at `79b9976` (Windows, `C:\vs5b`): `1 failed, 4517 passed`, the same. CI on `79b9976` (run 41105429617, Linux): failure, `1 failed, 4517 passed`, the same single test, so the session 5 Linux-only integral and mean failures are gone.
 
 ## `git log origin/main --oneline -3` (before this commit)
 
