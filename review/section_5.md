@@ -2556,3 +2556,1085 @@ FAILED tests/test_density.py::test_nonnegative_when_butterfly_passes - assert...
 3. `decisions/OPEN.md` O-37
 4. `volsurf/svi.py` (`check_grid`, `_Slice.constrained`) and `volsurf/density.py` (`density_check`)
 5. This section: 5b-D1, 5b-D3
+
+## Session 5c
+
+Instruction `instructions/05c_section_5_finish.md`: step 5c.1, then step 5.1 again and step 5.2.
+
+### Section (session 5c)
+
+**Section 5 is complete.** Step 5c.1 accepts a fit on any route only with w ≥ 1e-12 on the 200,001-point acceptance grid and every Section 5.4 bound and constraint met exactly, and O-37 (a) restates the non-negativity test. Section 4 was rerun over 3 days: 2026-10-28, 2026-10-29 and 2026-10-30. The 2026-10-30 capture was in the `snapshots` release when the session started, so it is the third day, per the instruction 05c status 8 decision. Against session 5b, only CSCO 2026-11-13 and SHOP 2026-11-20 on 2026-10-29 changed: both are now `ok_refit` with positive w, and neither is `density_fail` any more. Step 5.1 checks 1,013 accepted slices: 1,011 are `ok` and 2 are `density_fail`, both long-dated MU on 2026-10-30. Their mean misses `int_tol` by exactly the mean mass beyond k = +10, which the mean leaves out (5c-D2). Step 5.2 writes the tail tables for the 1,011 and the 2 PIT rows (`^SPX` and SPY 2026-10-29). The full suite passes.
+
+There are two findings, both reported and not changed. On the owner's choice when asked in session, the section was finished rather than stopped:
+
+- **O-38.** The finite-difference bound of instruction 05b, measured on every accepted slice, is broken by 109 of 1,013. 97 of those have s at its floor, and the analytic density is not at fault (5c-D2).
+- **O-39.** The density stage reads the SVI parameters from `svi_fits.csv`, which rounds them to 10 significant digits. That moves g by up to about 5e-10 (5c-D2).
+
+### Steps completed (session 5c)
+
+- 5c.1  d25abb1  w ≥ 1e-12 and exact Section 5.4 constraints on every route, the first included; the O-37 (a) test; the CSCO and SHOP fixtures and test; Section 4 rerun over 3 days with the 2026-10-30 IV stage; the instruction 05c decisions in `decisions/section_5_review.md`, the `CLAUDE.md` amendment, O-37 marked decided
+- 5.1  558b5cf  density checks with `density_status` on every accepted slice of every day (`density_checks.csv`), and the analytic against finite-difference gap on every day
+- 5.2  68e173a  tail tables (`tail_probs.csv`), PIT (`pit.csv`) and `spx_density_last.png`
+
+### 5c-D1. Step 5c.1
+
+**Every slice whose status or route changed against session 5b** (2026-10-28 and 2026-10-29, keyed by day, ticker and expiry):
+
+```
+            day ticker      expiry         T  n_quotes status_5b route_5b  rmse_volpts_5b  min_g_5b    status  route  cut_rounds     exit  rmse_volpts         min_g
+322  2026-10-29   CSCO  2026-11-13  0.041261        31        ok    first        1.366130  0.000177  ok_refit  refit           0  maxiter     1.365723  1.536510e-07
+595  2026-10-29   SHOP  2026-11-20  0.060432        32        ok    first        0.640359  0.000576  ok_refit  refit           0  success     0.640351  7.793401e-04
+changed 2 of 616 slices on the 2 session 5b days; new day rows 504
+```
+
+CSCO and SHOP were the 2 `density_fail` slices of session 5b, with w < 0 on their `first`-route fits. Both now fail the first-route check and are accepted on the `refit` route. Their smallest w on the acceptance grid, from the fixtures (`test_negative_w_slices_never_accepted`, passes):
+
+```
+csco_2026-11-13_iv.csv {'status': 'ok_refit', 'route': 'refit', 'exit': 'maxiter', 'rmse_volpts': 1.3657229157754642, 'min_g': 1.536510048263099e-07, 'cut_rounds': 0, 'params': (-0.0010816703504363174, 0.004458983654238665, -0.7244676233926619, 1.8202113894614673, 0.6892425223129166)}
+  min w on the acceptance grid 0.0010367970486088096
+shop_2026-11-20_iv.csv {'status': 'ok_refit', 'route': 'refit', 'exit': 'success', 'rmse_volpts': 0.6403506707066189, 'min_g': 0.0007793400816698432, 'cut_rounds': 0, 'params': (-0.004033419907978156, 0.004581308360622208, -0.8747231005464895, 4.660477859265366, 1.8167209471057562)}
+  min w on the acceptance grid 7.777406159543976e-08
+```
+
+**Accepted counts per ticker per day** (`slices` is all expiries; `fitted` is those with ≥ 8 quotes):
+
+```
+         accepted                           slices                           fitted                            share                      
+day    2026-10-28 2026-10-29 2026-10-30 2026-10-28 2026-10-29 2026-10-30 2026-10-28 2026-10-29 2026-10-30 2026-10-28 2026-10-29 2026-10-30
+ticker                                                                                                                                    
+^SPX         36.0       34.0       34.0       36.0       35.0       34.0       36.0       35.0       34.0        1.0   0.971429   1.000000
+SPY          24.0       23.0       21.0       24.0       23.0       22.0       24.0       23.0       22.0        1.0   1.000000   0.954545
+AAPL         14.0       13.0       13.0       14.0       14.0       13.0       14.0       14.0       13.0        1.0   0.928571   1.000000
+QQQ           NaN       20.0       19.0        NaN       21.0       20.0        NaN       21.0       20.0        NaN   0.952381   0.950000
+XLK           NaN        9.0        6.0        NaN       12.0       11.0        NaN       12.0       11.0        NaN   0.750000   0.545455
+XLE           NaN       10.0        9.0        NaN       17.0       16.0        NaN       14.0       14.0        NaN   0.714286   0.642857
+XLF           NaN       13.0       14.0        NaN       17.0       16.0        NaN       13.0       14.0        NaN   1.000000   1.000000
+NVDA          NaN       16.0       15.0        NaN       16.0       15.0        NaN       16.0       15.0        NaN   1.000000   1.000000
+MSFT          NaN       15.0       14.0        NaN       15.0       14.0        NaN       15.0       14.0        NaN   1.000000   1.000000
+AMD           NaN       11.0       12.0        NaN       15.0       14.0        NaN       15.0       14.0        NaN   0.733333   0.857143
+AVGO          NaN       16.0       12.0        NaN       16.0       15.0        NaN       16.0       15.0        NaN   1.000000   0.800000
+MU            NaN       17.0       10.0        NaN       18.0       17.0        NaN       18.0       17.0        NaN   0.944444   0.588235
+INTC          NaN       12.0       11.0        NaN       13.0       12.0        NaN       13.0       12.0        NaN   0.923077   0.916667
+PLTR          NaN       12.0       12.0        NaN       14.0       13.0        NaN       14.0       13.0        NaN   0.857143   0.923077
+CSCO          NaN       11.0        7.0        NaN       12.0       11.0        NaN       11.0       11.0        NaN   1.000000   0.636364
+PANW          NaN       12.0        7.0        NaN       13.0       12.0        NaN       13.0       12.0        NaN   0.923077   0.583333
+AMAT          NaN       12.0       11.0        NaN       13.0       12.0        NaN       13.0       12.0        NaN   0.923077   0.916667
+LRCX          NaN        9.0       10.0        NaN       12.0       11.0        NaN       12.0       11.0        NaN   0.750000   0.909091
+ORCL          NaN       13.0       11.0        NaN       14.0       13.0        NaN       14.0       13.0        NaN   0.928571   0.846154
+CRM           NaN       13.0       12.0        NaN       13.0       12.0        NaN       13.0       12.0        NaN   1.000000   1.000000
+IBM           NaN       13.0       12.0        NaN       14.0       13.0        NaN       14.0       13.0        NaN   0.928571   0.923077
+AMZN          NaN       14.0       12.0        NaN       16.0       15.0        NaN       16.0       15.0        NaN   0.875000   0.800000
+META          NaN       16.0       15.0        NaN       16.0       15.0        NaN       16.0       15.0        NaN   1.000000   1.000000
+GOOGL         NaN       15.0       13.0        NaN       15.0       14.0        NaN       15.0       13.0        NaN   1.000000   1.000000
+TSLA          NaN       15.0       10.0        NaN       15.0       14.0        NaN       15.0       14.0        NaN   1.000000   0.714286
+NFLX          NaN        7.0        7.0        NaN       11.0       10.0        NaN       10.0       10.0        NaN   0.700000   0.700000
+JPM           NaN       10.0       10.0        NaN       11.0       10.0        NaN       10.0       10.0        NaN   1.000000   1.000000
+BAC           NaN       14.0       14.0        NaN       15.0       14.0        NaN       14.0       14.0        NaN   1.000000   1.000000
+XOM           NaN       13.0       12.0        NaN       13.0       12.0        NaN       13.0       12.0        NaN   1.000000   1.000000
+CVX           NaN       10.0       10.0        NaN       11.0       10.0        NaN       10.0       10.0        NaN   1.000000   1.000000
+UNH           NaN       10.0       10.0        NaN       11.0       10.0        NaN       11.0       10.0        NaN   0.909091   1.000000
+WMT           NaN       10.0       10.0        NaN       11.0       10.0        NaN       10.0       10.0        NaN   1.000000   1.000000
+HD            NaN       12.0       12.0        NaN       13.0       12.0        NaN       12.0       12.0        NaN   1.000000   1.000000
+DIS           NaN       11.0       10.0        NaN       12.0       11.0        NaN       11.0       10.0        NaN   1.000000   1.000000
+UBER          NaN       10.0       10.0        NaN       11.0       10.0        NaN       10.0       10.0        NaN   1.000000   1.000000
+SHOP          NaN       12.0       10.0        NaN       12.0       11.0        NaN       12.0       11.0        NaN   1.000000   0.909091
+ABNB          NaN       10.0        9.0        NaN       12.0       10.0        NaN       10.0       10.0        NaN   1.000000   0.900000
+```
+
+Shares below the fixture gate's 0.75 are reported only, as instruction 05b did for XLE and NFLX:
+- 2026-10-30: XLK 0.545, PANW 0.583, MU 0.588, CSCO 0.636, XLE 0.643, NFLX 0.700 and TSLA 0.714.
+- 2026-10-29: NFLX 0.700, XLE 0.714 and AMD 0.733.
+
+**Status by route per day:**
+
+```
+status     butterfly_fail    ok  ok_refit       poor_fit       too_few   All
+route               first first neighbour refit    first refit              
+day                                                                         
+2026-10-28              0     9         2    63        0     0       0    74
+2026-10-29              3   234        10   249        5    23      18   542
+2026-10-30              1   242         8   196       28    23       6   504
+All                     4   485        20   508       33    46      24  1120
+```
+
+**Fixture gate** (`test_fixture_accepted_slices`, passes; the same counts and routes as session 5b):
+
+```
+status    ok  ok_refit      
+route  first neighbour refit
+ticker                      
+AAPL       3         0    11
+SPY        6         1    17
+^SPX       0         1    35
+        accepted  fitted  share
+ticker                         
+^SPX          36      36    1.0
+SPY           24      24    1.0
+AAPL          14      14    1.0
+```
+
+**Wing and acceptance grid** (`test_fixture_accepted_wing_and_wide_grid`, passes):
+
+```
+   ticker      expiry         T      wing   min_g_check      route  cut_rounds
+0    ^SPX  2026-10-29  0.003309  0.022101  5.287970e-03  neighbour           0
+1    ^SPX  2026-10-30  0.006048  0.030619  1.642540e-05      refit           0
+2    ^SPX  2026-11-02  0.014382  0.033256  4.185490e-06      refit           0
+3    ^SPX  2026-11-03  0.017121  0.039571  6.342057e-06      refit           0
+4    ^SPX  2026-11-04  0.019861  0.047112  3.868013e-06      refit           0
+5    ^SPX  2026-11-05  0.022601  0.049759  4.677019e-06      refit           0
+6    ^SPX  2026-11-06  0.025340  0.052242  3.565376e-09      refit           1
+7    ^SPX  2026-11-09  0.033560  0.055771 -1.779889e-12      refit           2
+8    ^SPX  2026-11-10  0.036299  0.058295  2.274547e-10      refit           1
+9    ^SPX  2026-11-11  0.039039  0.061032 -3.962015e-11      refit           1
+10   ^SPX  2026-11-12  0.041779  0.063990  6.315429e-07      refit           0
+11   ^SPX  2026-11-13  0.044518  0.065632  5.857453e-09      refit           1
+12   ^SPX  2026-11-16  0.052738  0.068659 -3.921877e-12      refit           1
+13   ^SPX  2026-11-17  0.055477  0.069777  3.882228e-09      refit           1
+14   ^SPX  2026-11-18  0.058217  0.072573 -6.143866e-11      refit           1
+15   ^SPX  2026-11-19  0.060957  0.074568 -5.850043e-13      refit           1
+16   ^SPX  2026-11-20  0.063696  0.079155 -2.657735e-13      refit           1
+17   ^SPX  2026-11-23  0.071916  0.079243  9.672332e-13      refit           1
+18   ^SPX  2026-11-24  0.074655  0.081003  5.694777e-09      refit           1
+19   ^SPX  2026-11-25  0.077395  0.081715  2.591118e-11      refit           1
+20   ^SPX  2026-11-27  0.082874  0.083796  1.726839e-09      refit           1
+21   ^SPX  2026-11-30  0.091094  0.083806  4.168654e-08      refit           1
+22   ^SPX  2026-12-01  0.093833  0.084171  6.193657e-14      refit           1
+23   ^SPX  2026-12-03  0.099313  0.087884  1.267507e-12      refit           1
+24   ^SPX  2026-12-04  0.102052  0.091294  3.827778e-09      refit           1
+25   ^SPX  2026-12-11  0.121230  0.097927  6.163611e-12      refit           1
+26   ^SPX  2026-12-18  0.140409  0.107963  1.668165e-09      refit           1
+27   ^SPX  2026-12-31  0.176025  0.120107 -2.012591e-12      refit           1
+28   ^SPX  2027-01-15  0.217121  0.133967 -9.356689e-12      refit           1
+29   ^SPX  2027-01-29  0.255477  0.146370  3.745647e-09      refit           1
+30   ^SPX  2027-02-19  0.313011  0.163184  2.005712e-10      refit           1
+31   ^SPX  2027-02-26  0.332189  0.164643  2.801705e-11      refit           1
+32   ^SPX  2027-03-19  0.389609  0.179921  6.478348e-11      refit           1
+33   ^SPX  2027-03-31  0.422486  0.177635 -1.691841e-12      refit           1
+34   ^SPX  2027-06-30  0.671801  0.210068  1.498241e-10      refit           1
+35   ^SPX  2027-09-30  0.923856  0.224344  8.373836e-12      refit           1
+36    SPY  2026-10-29  0.003308  0.020317 -6.291318e-11  neighbour           1
+37    SPY  2026-10-30  0.006047  0.027067  2.076078e-06      refit           0
+38    SPY  2026-11-02  0.014381  0.041154  3.257273e-03      refit           0
+39    SPY  2026-11-03  0.017120  0.047549  1.653189e-02      refit           0
+40    SPY  2026-11-04  0.019860  0.054169  2.547377e-02      refit           0
+41    SPY  2026-11-05  0.022600  0.045541  2.629610e-02      refit           0
+42    SPY  2026-11-06  0.025340  0.052275  4.523154e-02      refit           0
+43    SPY  2026-11-13  0.044518  0.068270  1.382446e-02      refit           0
+44    SPY  2026-11-20  0.063696  0.076643  9.544750e-03      first           0
+45    SPY  2026-11-27  0.082874  0.085520  5.155282e-07      refit           0
+46    SPY  2026-11-30  0.091093  0.086676  1.643768e-09      refit           1
+47    SPY  2026-12-04  0.102052  0.092712  5.350487e-03      first           0
+48    SPY  2026-12-18  0.140408  0.110731  1.233194e-09      refit           1
+49    SPY  2026-12-31  0.176024  0.113605  8.010909e-08      refit           0
+50    SPY  2027-01-15  0.217120  0.147434  3.399065e-10      refit           1
+51    SPY  2027-01-29  0.255476  0.134835  9.117780e-03      first           0
+52    SPY  2027-02-19  0.313011  0.165277 -4.709190e-11      refit           1
+53    SPY  2027-02-26  0.332189  0.119353  1.829288e-01      first           0
+54    SPY  2027-03-19  0.389609  0.195076  1.080498e-10      refit           1
+55    SPY  2027-03-31  0.422485  0.184120  4.926914e-10      refit           1
+56    SPY  2027-06-17  0.636184  0.243090 -1.382727e-12      refit           1
+57    SPY  2027-06-30  0.671800  0.152458  2.308578e-01      first           0
+58    SPY  2027-09-17  0.888239  0.280213  2.224040e-12      refit           1
+59    SPY  2027-09-30  0.923855  0.175216  2.377759e-01      first           0
+60   AAPL  2026-10-30  0.006045  0.019184  4.139101e-02      refit           0
+61   AAPL  2026-11-04  0.019858  0.015051  2.583744e-01      refit           0
+62   AAPL  2026-11-06  0.025337  0.139562  5.157991e-07      refit           1
+63   AAPL  2026-11-13  0.044515  0.064195  1.015348e-12      refit           1
+64   AAPL  2026-11-20  0.063693  0.082542  5.271356e-11      refit           1
+65   AAPL  2026-11-27  0.082871  0.078086  1.366340e-08      refit           0
+66   AAPL  2026-12-04  0.102050  0.090956 -4.480895e-11      refit           1
+67   AAPL  2026-12-18  0.140406  0.108152  1.252142e-10      refit           0
+68   AAPL  2027-01-15  0.217118  0.140706  5.205524e-11      refit           1
+69   AAPL  2027-02-19  0.313008  0.065090  2.495289e-01      first           0
+70   AAPL  2027-03-19  0.389607  0.081725  1.695461e-01      first           0
+71   AAPL  2027-04-16  0.466319  0.067023  2.685415e-01      first           0
+72   AAPL  2027-06-17  0.636182  0.251893 -1.258910e-12      refit           1
+73   AAPL  2027-09-17  0.888237  0.308151  6.719555e-13      refit           1
+largest wing np.float64(0.308150919196387), smallest min g np.float64(-6.291318160878134e-11)
+```
+
+**Every slice that is not accepted:**
+
+```
+             day ticker      expiry         T  n_quotes  rmse_volpts         min_g  refit     exit  route  cut_rounds          status
+79    2026-10-29   ^SPX  2026-11-06  0.022089       224     0.456797 -1.743246e-02   True  maxiter  first           0  butterfly_fail
+133   2026-10-29    QQQ  2026-11-02  0.011129        60    10.355615  1.000000e+00   True  success  refit           0        poor_fit
+159   2026-10-29    XLK  2026-12-18  0.137155        46    96.687274  1.743021e-13   True  success  refit           1        poor_fit
+160   2026-10-29    XLK  2027-01-15  0.213868        34    40.524347  2.519988e-01   True  success  refit           0        poor_fit
+163   2026-10-29    XLK  2027-06-17  0.632932        51     4.503617 -3.176674e-11   True  success  refit           1        poor_fit
+165   2026-10-29    XLE  2026-10-30  0.002795         6          NaN           NaN  False      NaN                  0         too_few
+166   2026-10-29    XLE  2026-11-02  0.011128         6          NaN           NaN  False      NaN                  0         too_few
+173   2026-10-29    XLE  2026-12-18  0.137155        23    39.809920 -7.886005e+01   True  success  first           0  butterfly_fail
+174   2026-10-29    XLE  2026-12-31  0.172772         5          NaN           NaN  False      NaN                  0         too_few
+175   2026-10-29    XLE  2027-01-15  0.213867        13    53.342817  1.069005e-07   True  success  refit           1        poor_fit
+177   2026-10-29    XLE  2027-03-31  0.419233        38     6.994717  1.000000e+00   True  success  refit           0        poor_fit
+178   2026-10-29    XLE  2027-06-17  0.632931        37    14.048406  2.402722e-01  False  success  first           0        poor_fit
+182   2026-10-29    XLF  2026-10-30  0.002794         2          NaN           NaN  False      NaN                  0         too_few
+183   2026-10-29    XLF  2026-11-02  0.011127         4          NaN           NaN  False      NaN                  0         too_few
+184   2026-10-29    XLF  2026-11-04  0.016607         7          NaN           NaN  False      NaN                  0         too_few
+189   2026-10-29    XLF  2026-12-04  0.098799         7          NaN           NaN  False      NaN                  0         too_few
+215   2026-10-29   AAPL  2026-10-30  0.002793        10     5.831315  1.000000e+00   True  success  refit           0        poor_fit
+244   2026-10-29    AMD  2026-10-30  0.002793        54     4.911598  2.586764e-01  False  success  first           0        poor_fit
+245   2026-10-29    AMD  2026-11-02  0.011126        73     2.270757  2.568880e-01  False  success  first           0        poor_fit
+246   2026-10-29    AMD  2026-11-04  0.016605        86     2.811202  5.606078e-07   True  maxiter  refit           0        poor_fit
+247   2026-10-29    AMD  2026-11-06  0.022085       146     2.319722  6.510001e-10   True  success  refit           1        poor_fit
+275   2026-10-29     MU  2026-10-30  0.002792        86     3.857352  4.509155e-03   True  maxiter  refit           0        poor_fit
+293   2026-10-29   INTC  2026-10-30  0.002791        51     4.832110  6.414579e-03   True  maxiter  refit           0        poor_fit
+306   2026-10-29   PLTR  2026-10-30  0.002791        12     5.135777  2.509385e-01   True  success  refit           0        poor_fit
+307   2026-10-29   PLTR  2026-11-06  0.022083        60     2.827872  5.486826e-10   True  maxiter  refit           1        poor_fit
+320   2026-10-29   CSCO  2026-10-30  0.002791         7          NaN           NaN  False      NaN                  0         too_few
+332   2026-10-29   PANW  2026-10-30  0.002790        17     2.309102  1.788336e-02  False  maxiter  first           0        poor_fit
+345   2026-10-29   AMAT  2026-10-30  0.002790        24     3.672687  2.578201e-01   True  success  refit           0        poor_fit
+358   2026-10-29   LRCX  2026-10-30  0.002790        13     7.356664  2.552934e-01   True  success  refit           0        poor_fit
+359   2026-10-29   LRCX  2026-11-06  0.022082        30     2.387184  2.516842e-01  False  success  first           0        poor_fit
+364   2026-10-29   LRCX  2026-12-18  0.137150        32    92.117827  5.279145e-05   True  success  refit           0        poor_fit
+370   2026-10-29   ORCL  2026-10-30  0.002789        20     3.529684  2.527207e-01   True  success  refit           0        poor_fit
+397   2026-10-29    IBM  2026-10-30  0.002789         8     2.665660  2.518820e-01   True  success  refit           0        poor_fit
+411   2026-10-29   AMZN  2026-10-30  0.002788        41     4.001159  1.840012e-04   True  success  refit           0        poor_fit
+412   2026-10-29   AMZN  2026-11-02  0.011122        43     2.625497  3.669994e-05   True  success  refit           0        poor_fit
+473   2026-10-29   NFLX  2026-10-30  0.002787         3          NaN           NaN  False      NaN                  0         too_few
+479   2026-10-29   NFLX  2026-12-18  0.137147        54   117.091010  5.747324e-01   True  success  refit           0        poor_fit
+480   2026-10-29   NFLX  2027-01-15  0.213860       113    16.918310 -7.274414e-01   True  success  first           0  butterfly_fail
+482   2026-10-29   NFLX  2027-06-17  0.632924       124   140.307550  3.633688e-01   True  success  refit           0        poor_fit
+484   2026-10-29    JPM  2026-10-30  0.002787         7          NaN           NaN  False      NaN                  0         too_few
+495   2026-10-29    BAC  2026-10-30  0.002786         2          NaN           NaN  False      NaN                  0         too_few
+525   2026-10-29    CVX  2026-11-13  0.041256         7          NaN           NaN  False      NaN                  0         too_few
+534   2026-10-29    UNH  2026-10-30  0.002785         9     3.943104  2.527574e-01   True  success  refit           0        poor_fit
+545   2026-10-29    WMT  2026-10-30  0.002785         6          NaN           NaN  False      NaN                  0         too_few
+556   2026-10-29     HD  2026-10-30  0.002785         7          NaN           NaN  False      NaN                  0         too_few
+569   2026-10-29    DIS  2026-10-30  0.002784         4          NaN           NaN  False      NaN                  0         too_few
+581   2026-10-29   UBER  2026-10-30  0.002784         4          NaN           NaN  False      NaN                  0         too_few
+604   2026-10-29   ABNB  2026-10-30  0.002783         2          NaN           NaN  False      NaN                  0         too_few
+609   2026-10-29   ABNB  2026-12-04  0.098788         1          NaN           NaN  False      NaN                  0         too_few
+654   2026-10-30    SPY  2026-11-06  0.019299       106    17.111022  1.000000e+00   True  success  refit           0        poor_fit
+676   2026-10-30    QQQ  2026-11-06  0.019299       119     2.128822 -1.649268e-11   True  success  refit           1        poor_fit
+692   2026-10-30    XLK  2026-11-06  0.019298        31     2.998144  2.535626e-01  False  success  first           0        poor_fit
+694   2026-10-30    XLK  2026-11-20  0.057655        40     2.017263  2.553079e-01  False  success  first           0        poor_fit
+697   2026-10-30    XLK  2026-12-18  0.134367        50   117.496056  2.610740e-07   True  success  refit           1        poor_fit
+698   2026-10-30    XLK  2027-01-15  0.211079        41    41.320624  1.000000e+00   True  success  refit           0        poor_fit
+701   2026-10-30    XLK  2027-06-17  0.630143        47     4.546917 -8.783822e-11   True  success  refit           1        poor_fit
+703   2026-10-30    XLE  2026-11-02  0.008339         4          NaN           NaN  False      NaN                  0         too_few
+710   2026-10-30    XLE  2026-12-18  0.134367        25    65.417368  5.150496e-04   True  success  refit           0        poor_fit
+711   2026-10-30    XLE  2026-12-31  0.169983         5          NaN           NaN  False      NaN                  0         too_few
+712   2026-10-30    XLE  2027-01-15  0.211079        15    49.860885  2.442551e-01  False  success  first           0        poor_fit
+714   2026-10-30    XLE  2027-03-31  0.416444        37     7.551885  1.000000e+00   True  success  refit           0        poor_fit
+715   2026-10-30    XLE  2027-06-17  0.630143        36    13.452372  2.460312e-01  False  success  first           0        poor_fit
+716   2026-10-30    XLE  2027-06-30  0.665759        23     2.180238  3.123258e-01  False  success  first           0        poor_fit
+719   2026-10-30    XLF  2026-11-02  0.008339         4          NaN           NaN  False      NaN                  0         too_few
+725   2026-10-30    XLF  2026-12-04  0.096010         7          NaN           NaN  False      NaN                  0         too_few
+778   2026-10-30    AMD  2026-11-04  0.013817        87     2.475345  2.288897e-11   True  success  refit           2        poor_fit
+779   2026-10-30    AMD  2026-11-06  0.019296       139     2.522912  1.326661e-10   True  success  refit           1        poor_fit
+791   2026-10-30   AVGO  2026-11-02  0.008337        25     3.804988  2.512707e-01  False  success  first           0        poor_fit
+792   2026-10-30   AVGO  2026-11-04  0.013817        24     3.930364  2.540562e-01  False  success  first           0        poor_fit
+793   2026-10-30   AVGO  2026-11-06  0.019296        42     2.500346  2.559996e-01  False  success  first           0        poor_fit
+806   2026-10-30     MU  2026-11-02  0.008337        73     6.880731  1.081290e-08   True  success  refit           0        poor_fit
+807   2026-10-30     MU  2026-11-04  0.013816       111     5.190465  1.051099e-03  False  maxiter  first           0        poor_fit
+808   2026-10-30     MU  2026-11-06  0.019296       158     4.403018  1.939547e-02  False  maxiter  first           0        poor_fit
+809   2026-10-30     MU  2026-11-13  0.038474       168     3.418609  7.958465e-02  False  success  first           0        poor_fit
+810   2026-10-30     MU  2026-11-20  0.057652       177     2.775459  1.218739e-01  False  success  first           0        poor_fit
+811   2026-10-30     MU  2026-11-27  0.076830       179     2.468551  4.693599e-02  False  success  first           0        poor_fit
+812   2026-10-30     MU  2026-12-04  0.096008       107     2.595543 -8.155768e-13   True  success  refit           1        poor_fit
+823   2026-10-30   INTC  2026-11-06  0.019295        22     2.167799  2.437594e-01  False  success  first           0        poor_fit
+835   2026-10-30   PLTR  2026-11-06  0.019295        65     2.832035  2.804243e-10   True  success  refit           1        poor_fit
+848   2026-10-30   CSCO  2026-11-06  0.019295        18     2.089454  1.040092e-01  False  success  first           0        poor_fit
+849   2026-10-30   CSCO  2026-11-13  0.038473        27     2.058256  2.773484e-01   True  success  refit           0        poor_fit
+851   2026-10-30   CSCO  2026-11-27  0.076829        30     2.680989  2.835878e-01  False  success  first           0        poor_fit
+852   2026-10-30   CSCO  2026-12-04  0.096007        12     2.897615  3.770492e-01  False  success  first           0        poor_fit
+859   2026-10-30   PANW  2026-11-06  0.019294        39     4.473654  2.613885e-01  False  success  first           0        poor_fit
+860   2026-10-30   PANW  2026-11-13  0.038473        29     3.054062  2.678884e-01  False  success  first           0        poor_fit
+861   2026-10-30   PANW  2026-11-20  0.057651        36     3.753963  2.765337e-01  False  success  first           0        poor_fit
+862   2026-10-30   PANW  2026-11-27  0.076829        23     2.751614  2.701070e-01  False  success  first           0        poor_fit
+863   2026-10-30   PANW  2026-12-04  0.096007        24     2.713692  2.688155e-01  False  success  first           0        poor_fit
+871   2026-10-30   AMAT  2026-11-06  0.019294        42     3.101792  2.610248e-01  False  success  first           0        poor_fit
+888   2026-10-30   LRCX  2026-12-18  0.134362        30    25.471306 -3.026038e+00   True  success  first           0  butterfly_fail
+894   2026-10-30   ORCL  2026-11-06  0.019294        54     2.962214  5.204170e-15   True  success  refit           1        poor_fit
+895   2026-10-30   ORCL  2026-11-13  0.038472        52     2.092265  5.772626e-09   True  maxiter  refit           1        poor_fit
+920   2026-10-30    IBM  2026-11-13  0.038471        12     2.411552  2.556870e-01  False  success  first           0        poor_fit
+932   2026-10-30   AMZN  2026-11-02  0.008334        19     3.878268  2.509233e-01   True  success  refit           0        poor_fit
+933   2026-10-30   AMZN  2026-11-04  0.013813        21     3.608969  2.523007e-01  False  success  first           0        poor_fit
+934   2026-10-30   AMZN  2026-11-06  0.019293        29     2.596467  2.523470e-01  False  success  first           0        poor_fit
+962   2026-10-30  GOOGL  2026-11-02  0.008333         4          NaN           NaN  False      NaN                  0         too_few
+976   2026-10-30   TSLA  2026-11-02  0.008333        39     4.834710  1.599607e-01   True  success  refit           0        poor_fit
+977   2026-10-30   TSLA  2026-11-04  0.013812        62     4.639923  3.448582e-11   True  success  refit           1        poor_fit
+978   2026-10-30   TSLA  2026-11-06  0.019292        86     4.321765  1.948650e-08   True  success  refit           1        poor_fit
+979   2026-10-30   TSLA  2026-11-13  0.038470        74     2.226644  2.303104e-02  False  success  first           0        poor_fit
+995   2026-10-30   NFLX  2026-12-18  0.134360        51    90.063665  1.000000e+00   True  success  refit           0        poor_fit
+996   2026-10-30   NFLX  2027-01-15  0.211072       101   186.777130  2.422669e-01   True  success  refit           0        poor_fit
+998   2026-10-30   NFLX  2027-06-17  0.630136       123   157.286353  1.000000e+00   True  success  refit           0        poor_fit
+1082  2026-10-30    DIS  2026-12-04  0.096001         6          NaN           NaN  False      NaN                  0         too_few
+1099  2026-10-30   SHOP  2026-11-06  0.019289        45     2.293290  6.862810e-02  False  success  first           0        poor_fit
+1110  2026-10-30   ABNB  2026-11-06  0.019288        16     2.140529  7.858230e-08   True  success  refit           0        poor_fit
+```
+
+**The largest RMSE** among accepted slices (all at or below 2.0):
+
+```
+             day ticker      expiry  n_quotes  rmse_volpts  route    status
+523   2026-10-29    CVX  2026-10-30        11     1.995970  first        ok
+1026  2026-10-30    XOM  2026-11-20        19     1.989966  first        ok
+896   2026-10-30   ORCL  2026-11-20        49     1.985415  refit  ok_refit
+132   2026-10-29    QQQ  2026-10-30        53     1.968696  refit  ok_refit
+278   2026-10-29     MU  2026-11-06       144     1.965829  first        ok
+777   2026-10-30    AMD  2026-11-02        58     1.958592  first        ok
+850   2026-10-30   CSCO  2026-11-20        32     1.954794  first        ok
+750   2026-10-30   AAPL  2026-11-04        40     1.918402  refit  ok_refit
+296   2026-10-29   INTC  2026-11-20        54     1.904759  refit  ok_refit
+308   2026-10-29   PLTR  2026-11-13        46     1.896986  first        ok
+```
+
+**Cutting-plane rounds** of the kept fit, by status and route:
+
+```
+cut_rounds                  0    1   2  3   All
+status         route                           
+butterfly_fail first        4    0   0  0     4
+ok             first      485    0   0  0   485
+ok_refit       neighbour    9   10   1  0    20
+               refit      162  335  10  1   508
+poor_fit       first       33    0   0  0    33
+               refit       30   15   1  0    46
+too_few                    24    0   0  0    24
+All                       747  360  12  1  1120
+```
+
+**Calendar violations** per day (pairs checked, pairs violated):
+
+```
+            size  sum
+day                  
+2026-10-28    71    1
+2026-10-29   456   10
+2026-10-30   409   17
+```
+
+**SURFACE_DAILY**, all 3 days. On 2026-10-30, MU and PANW are `no_bracket`: no accepted slice lies on the near side of 30 days. SHOP is `delta_outside_quotes`: its 25-delta strike falls outside the quoted range.
+
+```
+           day ticker    atm_30   rr25_30  ssvi_rr25_30   bf25_30    atm_90  term_slope  ssvi_rho  ssvi_eta  ssvi_gamma  ssvi_rmse  n_expiries                status
+0   2026-10-28   ^SPX  0.134443 -0.041576     -0.060791  0.006333  0.144621    0.010178 -0.528613  1.308375    0.500000   0.028619          36                    ok
+1   2026-10-28    SPY  0.135021 -0.039697     -0.065394  0.006166  0.145423    0.010402 -0.585908  1.261107    0.500000   0.035365          24                    ok
+2   2026-10-28   AAPL  0.263150 -0.046309     -0.043290  0.003191  0.247370   -0.015780 -0.407848  0.781445    0.455316   0.008000          14                    ok
+3   2026-10-29   ^SPX  0.129818 -0.041124     -0.062776  0.005962  0.142457    0.012639 -0.583518  1.263010    0.500000   0.026479          34                    ok
+4   2026-10-29    SPY  0.129984 -0.042602     -0.066148  0.005805  0.143154    0.013171 -0.631641  1.225760    0.500000   0.034143          23                    ok
+5   2026-10-29    QQQ  0.203829 -0.059261     -0.082562  0.007121  0.211987    0.008158 -0.536526  1.301638    0.480920   0.022152          20                    ok
+6   2026-10-29    XLK  0.252422 -0.064304     -0.053676  0.008213  0.272405    0.019983 -0.447077  0.834233    0.475290   0.009670           9                    ok
+7   2026-10-29    XLE  0.262667  0.004864     -0.002558  0.005737  0.264649    0.001982 -0.036184  0.566934    0.500000   0.008385          10                    ok
+8   2026-10-29    XLF  0.154036 -0.010438     -0.032887  0.005557  0.159006    0.004971 -0.303974  1.513400    0.447256   0.011900          13                    ok
+9   2026-10-29   NVDA  0.396215 -0.040482     -0.076163  0.006760  0.369985   -0.026230 -0.336958  0.929954    0.500000   0.032099          16                    ok
+10  2026-10-29   AAPL  0.258885 -0.039017     -0.041011  0.003571  0.247627   -0.011258 -0.383079  0.769098    0.463803   0.009633          13                    ok
+11  2026-10-29   MSFT  0.252602 -0.019800     -0.025698  0.003526  0.268069    0.015467 -0.234028  0.683946    0.500000   0.015244          15                    ok
+12  2026-10-29    AMD  0.586341 -0.013003     -0.044449  0.007602  0.533723   -0.052618 -0.194298  0.690476    0.500000   0.026885          11                    ok
+13  2026-10-29   AVGO  0.395859 -0.014989     -0.018794  0.007386  0.438851    0.042993 -0.124383  0.673153    0.500000   0.015505          16                    ok
+14  2026-10-29     MU  0.502526 -0.034522     -0.053001  0.013242  0.522903    0.020378 -0.182444  1.109754    0.500000   0.050087          17                    ok
+15  2026-10-29   INTC  0.619846 -0.018569      0.012349  0.009416  0.569827   -0.050019  0.016319  0.714200    0.478117   0.021707          12                    ok
+16  2026-10-29   PLTR  0.630187 -0.048520     -0.045889  0.005879  0.544050   -0.086137 -0.220090  0.806838    0.396872   0.017693          12                    ok
+17  2026-10-29   CSCO  0.465182 -0.020762     -0.026453  0.002098  0.387673   -0.077509 -0.249792  0.358413    0.500000   0.011587          11                    ok
+18  2026-10-29   PANW  0.620806 -0.015249     -0.013424  0.004375  0.583612   -0.037194 -0.101333  0.550166    0.398390   0.007402          12                    ok
+19  2026-10-29   AMAT  0.569970 -0.023466     -0.007346  0.004033  0.531341   -0.038630 -0.059260  0.673210    0.413191   0.009951          12                    ok
+20  2026-10-29   LRCX  0.534834 -0.043062     -0.016880 -0.000837  0.527104   -0.007730 -0.113551  0.724308    0.402488   0.011803           9                    ok
+21  2026-10-29   ORCL  0.513256  0.018141     -0.005854  0.007837  0.558285    0.045030 -0.050043  0.630923    0.500000   0.018727          13                    ok
+22  2026-10-29    CRM  0.434419  0.011341     -0.004831  0.000568  0.444725    0.010306 -0.049733  0.473285    0.500000   0.010982          13                    ok
+23  2026-10-29    IBM  0.320133 -0.044381     -0.017772  0.000733  0.334804    0.014671 -0.149934  0.608640    0.500000   0.009701          13                    ok
+24  2026-10-29   AMZN  0.444896 -0.014622     -0.029951  0.003414  0.372401   -0.072496 -0.221748  0.814613    0.376676   0.018437          14                    ok
+25  2026-10-29   META  0.367998 -0.004055     -0.008334  0.006819  0.383983    0.015985 -0.069189  0.646843    0.500000   0.014177          16                    ok
+26  2026-10-29  GOOGL  0.292474  0.003609      0.010014  0.009003  0.305727    0.013252  0.039348  0.880947    0.500000   0.025150          15                    ok
+27  2026-10-29   TSLA  0.359963 -0.015776     -0.030189  0.010049  0.392952    0.032989 -0.141599  1.106723    0.500000   0.043441          15                    ok
+28  2026-10-29   NFLX  0.316787 -0.001061      0.005844  0.003525  0.372236    0.055449  0.018202  0.770375    0.500000   0.017128           7                    ok
+29  2026-10-29    JPM  0.210138 -0.022391     -0.026426  0.000939  0.232595    0.022457 -0.351722  1.124929    0.371173   0.013089          10                    ok
+30  2026-10-29    BAC  0.234557 -0.013075     -0.028305  0.003329  0.253478    0.018920 -0.315313  1.247837    0.360996   0.007294          14                    ok
+31  2026-10-29    XOM  0.288051 -0.027247     -0.011395  0.002326  0.285051   -0.003000 -0.122294  1.056402    0.361448   0.009726          13                    ok
+32  2026-10-29    CVX  0.284845 -0.034668     -0.012635  0.000822  0.276332   -0.008514 -0.152069  1.123900    0.323303   0.011574          10                    ok
+33  2026-10-29    UNH  0.289413 -0.027638     -0.027804  0.003434  0.315418    0.026005 -0.294172  0.727952    0.426719   0.008403          10                    ok
+34  2026-10-29    WMT  0.317433 -0.001074     -0.012353  0.000311  0.274106   -0.043327 -0.125339  1.029280    0.353653   0.009405          10                    ok
+35  2026-10-29     HD  0.328803 -0.021864     -0.021360 -0.000421  0.289587   -0.039216 -0.310266  1.133291    0.232933   0.006086          12                    ok
+36  2026-10-29    DIS  0.334268 -0.018159     -0.022055  0.001772  0.284339   -0.049929 -0.260254  0.999257    0.301191   0.005078          11                    ok
+37  2026-10-29   UBER  0.432642 -0.016466     -0.003331  0.000468  0.372328   -0.060315 -0.038625  0.757324    0.393995   0.009004          10                    ok
+38  2026-10-29   SHOP  0.707910 -0.021422     -0.024035 -0.001526  0.584405   -0.123505 -0.282152  0.807178    0.050150   0.009773          12                    ok
+39  2026-10-29   ABNB  0.430087 -0.003722     -0.011853  0.003874  0.372094   -0.057994 -0.169277  1.186455    0.134315   0.010607          10                    ok
+40  2026-10-30   ^SPX  0.165400 -0.063631     -0.085232  0.008250  0.162588   -0.002812 -0.651599  1.210947    0.500000   0.027773          34                    ok
+41  2026-10-30    SPY  0.169682 -0.059956     -0.086865  0.007095  0.165534   -0.004148 -0.645733  1.215264    0.500000   0.036041          21                    ok
+42  2026-10-30    QQQ  0.261741 -0.111390     -0.111915  0.008459  0.240945   -0.020795 -0.581194  1.264867    0.481460   0.018196          19                    ok
+43  2026-10-30    XLK  0.337191 -0.135539     -0.109955  0.007702  0.308746   -0.028445 -0.644060  0.785850    0.500000   0.016030           6                    ok
+44  2026-10-30    XLE  0.284498 -0.018926     -0.017818  0.002708  0.273775   -0.010724 -0.233569  0.414545    0.500000   0.008437           9                    ok
+45  2026-10-30    XLF  0.173816 -0.031892     -0.043921  0.005942  0.169592   -0.004223 -0.365732  1.464416    0.447568   0.009971          14                    ok
+46  2026-10-30   NVDA  0.454351 -0.078105     -0.119149  0.009361  0.405855   -0.048496 -0.412703  1.046780    0.500000   0.042825          15                    ok
+47  2026-10-30   AAPL  0.296875 -0.084550     -0.067438  0.000875  0.267833   -0.029041 -0.490374  0.716272    0.500000   0.013107          13                    ok
+48  2026-10-30   MSFT  0.275765 -0.042609     -0.044696  0.004654  0.281024    0.005259 -0.350410  0.720213    0.500000   0.014759          14                    ok
+49  2026-10-30    AMD  0.646844 -0.051419     -0.081127  0.009333  0.570721   -0.076123 -0.277647  0.788012    0.500000   0.029854          12                    ok
+50  2026-10-30   AVGO  0.442320 -0.101572     -0.049194  0.006391  0.470217    0.027897 -0.256460  0.713605    0.500000   0.022363          12                    ok
+51  2026-10-30     MU       NaN       NaN           NaN       NaN  0.540941         NaN -0.228480  1.017280    0.500000   0.033043          10            no_bracket
+52  2026-10-30   INTC  0.620006 -0.094576     -0.040557  0.005716  0.570005   -0.050000 -0.148461  0.907800    0.500000   0.028730          11                    ok
+53  2026-10-30   PLTR  0.701080 -0.072551     -0.080359  0.005423  0.577785   -0.123295 -0.293593  0.670107    0.500000   0.020610          12                    ok
+54  2026-10-30   CSCO  0.498861 -0.000343     -0.005700  0.000286  0.409006   -0.089855 -0.110730  1.152276    0.000000   0.012265           7                    ok
+55  2026-10-30   PANW       NaN       NaN           NaN       NaN  0.614812         NaN -0.272644  0.518455    0.500000   0.014882           7            no_bracket
+56  2026-10-30   AMAT  0.623988 -0.056732     -0.034829  0.000542  0.561007   -0.062981 -0.185443  0.714337    0.407808   0.016852          11                    ok
+57  2026-10-30   LRCX  0.585974 -0.055829     -0.038616 -0.001852  0.567053   -0.018921 -0.219125  0.526584    0.486301   0.010162          10                    ok
+58  2026-10-30   ORCL  0.546769 -0.080014     -0.050302  0.010217  0.585201    0.038432 -0.215470  0.742695    0.500000   0.020321          11                    ok
+59  2026-10-30    CRM  0.470745 -0.000107     -0.011950  0.003693  0.463157   -0.007589 -0.106243  0.411008    0.500000   0.008557          12                    ok
+60  2026-10-30    IBM  0.333549 -0.056243     -0.027694  0.004279  0.347682    0.014133 -0.222621  0.594816    0.500000   0.012046          12                    ok
+61  2026-10-30   AMZN  0.334661 -0.077843     -0.039982  0.000382  0.338502    0.003841 -0.262020  0.730398    0.500000   0.016047          12                    ok
+62  2026-10-30   META  0.384192 -0.039383     -0.027506  0.006053  0.394763    0.010572 -0.178958  0.666106    0.500000   0.011926          15                    ok
+63  2026-10-30  GOOGL  0.314810 -0.039345     -0.006339  0.007654  0.323461    0.008651 -0.052768  0.962617    0.500000   0.030216          13                    ok
+64  2026-10-30   TSLA  0.410302 -0.072402     -0.060411  0.011191  0.421577    0.011275 -0.231147  1.112173    0.500000   0.043788          10                    ok
+65  2026-10-30   NFLX  0.341931 -0.007329     -0.000493  0.001390  0.381478    0.039547 -0.021636  0.773585    0.500000   0.020089           7                    ok
+66  2026-10-30    JPM  0.234088 -0.052063     -0.045113  0.001988  0.246393    0.012305 -0.439659  0.733779    0.483615   0.012629          10                    ok
+67  2026-10-30    BAC  0.259951 -0.026678     -0.034639  0.002376  0.270668    0.010717 -0.341880  0.946839    0.412623   0.006413          14                    ok
+68  2026-10-30    XOM  0.292017 -0.051089     -0.029237  0.000089  0.289166   -0.002851 -0.266961  0.673024    0.472298   0.011643          12                    ok
+69  2026-10-30    CVX  0.292926 -0.033744     -0.016058 -0.000308  0.286656   -0.006270 -0.204158  0.652636    0.410225   0.008170          10                    ok
+70  2026-10-30    UNH  0.311419 -0.025840     -0.026763  0.001955  0.325591    0.014172 -0.259304  0.737092    0.426968   0.007706          10                    ok
+71  2026-10-30    WMT  0.335947 -0.000902     -0.014325  0.002431  0.287483   -0.048464 -0.137153  0.701268    0.431650   0.008071          10                    ok
+72  2026-10-30     HD  0.336927 -0.009543     -0.020132  0.002158  0.293815   -0.043112 -0.263003  0.964563    0.283752   0.006617          12                    ok
+73  2026-10-30    DIS  0.353725 -0.014066     -0.019473 -0.000097  0.291699   -0.062026 -0.208813  0.982320    0.311856   0.007799          10                    ok
+74  2026-10-30   UBER  0.460572 -0.021928     -0.009505 -0.000932  0.382907   -0.077665 -0.082737  0.859262    0.343810   0.009782          10                    ok
+75  2026-10-30   SHOP  0.750901       NaN     -0.035516       NaN  0.604487   -0.146414 -0.315454  0.420175    0.317146   0.011750          10  delta_outside_quotes
+76  2026-10-30   ABNB  0.430788 -0.020100     -0.021396  0.003967  0.384734   -0.046054 -0.310154  0.526824    0.318324   0.007626           9                    ok
+```
+
+**Runtime:**
+- IV stage for 2026-10-30: 19 min 32 s.
+- `run_all.py --stage surface` over 3 days: 173 min 21 s (session 5b: 82 min 22 s over 2 days).
+- The tests of the changed files: 27 min 28 s.
+
+### 5c-D2. Instruction 05b part E items 2, 4 and 5, every day
+
+**Every accepted slice.** Computed with `density_check` on the 200,001-point sinh grid over [−10, 10], using the `svi_fits.csv` parameters as written (`%.10g`) and each slice's F. `fit_min_g` is the `min_g` column of `svi_fits.csv`: the fit's own value on the same grid, at full precision. Per ticker per day, the table gives:
+- the smallest g;
+- the largest and median |integral − 1|, |mean / F − 1| and `tail_mass`;
+- the smallest density;
+- the `density_fail` count.
+
+```
+                          min_g     fit_min_g   max_int_err   med_int_err  max_mean_err  med_mean_err  max_tail_mass  med_tail_mass    min_density   n  n_density_fail
+day        ticker                                                                                                                                                     
+2026-10-28 ^SPX   -1.933464e-10 -6.143866e-11  5.729954e-10  3.519085e-10  5.729954e-10  3.519086e-10   6.054017e-10   9.809805e-28  -3.815737e-12  36               0
+           SPY    -1.786125e-10 -6.291318e-11  6.156464e-10  3.500152e-10  6.156462e-10  3.500152e-10   3.669178e-08   1.585250e-20  -3.077689e-12  24               0
+           AAPL   -5.433747e-11 -4.480895e-11  6.973198e-10  3.419751e-10  4.899344e-08  3.834091e-10   1.370536e-12   2.208727e-29  -6.106614e-13  14               0
+2026-10-29 ^SPX   -3.045119e-10 -5.570506e-11  8.317900e-10  3.523263e-10  8.317897e-10  3.523264e-10   3.804599e-10   1.613986e-28  -3.767757e-12  34               0
+           SPY    -2.455816e-10 -2.676906e-11  2.483137e-09  3.436924e-10  2.483137e-09  3.436922e-10   3.946568e-08   2.626634e-21  -2.198819e-12  23               0
+           AAPL   -9.073371e-11 -2.935192e-11  5.458587e-10  2.126945e-10  1.807499e-09  2.147655e-10   8.713123e-09   1.429239e-18  -2.228353e-13  13               0
+           QQQ    -1.859868e-10 -4.974308e-11  2.483137e-09  2.663695e-10  1.166046e-07  2.994781e-10   1.578269e-07   2.769490e-18  -1.847186e-12  20               0
+           XLK     3.739548e-10  3.834637e-10  2.483136e-09  3.215230e-10  2.483136e-09  3.215230e-10   4.343320e-09   1.173467e-25   0.000000e+00   9               0
+           XLE     4.388475e-09  4.470899e-09  2.483135e-09  6.679028e-10  2.483135e-09  6.679028e-10   2.237591e-22   1.110756e-40   0.000000e+00  10               0
+           XLF     7.039116e-06  7.039268e-06  2.462244e-09  4.130747e-10  2.462244e-09  4.130747e-10   4.124914e-08   1.462444e-17   0.000000e+00  13               0
+           NVDA   -9.956105e-11  2.726985e-15  2.483136e-09  1.710204e-10  5.933577e-09  2.575877e-10   6.404299e-04   8.273292e-08  -1.347484e-12  16               0
+           MSFT    5.463255e-12 -3.563538e-13  5.663179e-10  2.889555e-10  5.663177e-10  2.889555e-10   4.173061e-08   3.008517e-15   0.000000e+00  15               0
+           AMD     1.963998e-11  3.922557e-14  2.660574e-10  2.085512e-10  8.721286e-10  1.947684e-10   6.249505e-05   9.453903e-08  1.285714e-112  11               0
+           AVGO   -1.567594e-10 -1.071438e-11  4.065044e-10  1.676621e-10  4.281679e-09  2.219943e-10   3.259688e-04   7.228269e-09  -2.721983e-12  16               0
+           MU     -1.741371e-10 -3.787470e-12  2.221001e-10  1.308682e-10  3.588039e-04  1.937557e-08   2.597934e-03   1.605059e-05  -3.451229e-12  17               0
+           INTC   -1.420093e-10 -6.611857e-12  7.073175e-10  1.354662e-10  1.930318e-06  6.261202e-10   7.429041e-04   7.693959e-06  -2.259224e-12  12               0
+           PLTR   -1.007190e-10 -3.897625e-12  5.911276e-10  1.535665e-10  8.705781e-07  1.648228e-09   4.821184e-04   2.847592e-05  -5.076630e-14  12               0
+           CSCO    2.405094e-11 -1.348137e-12  2.483131e-09  2.483107e-09  8.204150e-06  2.483111e-09   1.739387e-10  3.034613e-113   0.000000e+00  11               0
+           PANW   -4.612491e-12 -1.236858e-13  2.483137e-09  2.996922e-10  1.255677e-07  2.483124e-09   1.248706e-03   1.523564e-12  -1.289880e-14  12               0
+           AMAT   -2.696255e-11  1.637857e-13  2.483128e-09  3.842401e-10  2.483128e-09  5.404669e-10   6.961631e-05   6.652593e-24  -2.149685e-13  12               0
+           LRCX    6.225447e-02  6.225447e-02  2.483131e-09  5.236991e-10  2.464361e-06  2.483107e-09   4.341777e-06   2.575963e-47  1.123742e-216   9               0
+           ORCL   -9.202866e-11 -2.541479e-11  2.483043e-09  3.090512e-10  1.156746e-08  4.880920e-10   9.987300e-04   1.464739e-11  -5.155868e-12  13               0
+           CRM     1.868146e-03  1.868146e-03  2.483123e-09  4.028187e-10  2.483124e-09  4.028091e-10   3.226886e-10   3.190896e-28   0.000000e+00  13               0
+           IBM    -6.572828e-11  4.527628e-13  2.483130e-09  3.105065e-10  4.998315e-06  7.799872e-10   8.285403e-05   2.059272e-30  -2.089668e-12  13               0
+           AMZN   -2.170600e-11 -2.058291e-12  2.483060e-09  2.877988e-10  2.483060e-09  2.877990e-10   5.219463e-10   7.599482e-16  -4.302459e-13  14               0
+           META   -1.066567e-10 -7.834886e-12  1.066381e-09  1.564250e-10  3.988528e-06  4.519180e-10   6.171634e-05   2.307387e-09  -1.858197e-13  16               0
+           GOOGL  -1.177392e-10 -1.540434e-15  5.217395e-10  2.074561e-10  4.834056e-05  3.083114e-10   1.591541e-04   4.946232e-16  -3.812696e-13  15               0
+           TSLA    5.909594e-11 -9.358209e-12  6.860941e-10  2.257545e-10  6.165820e-09  2.447138e-10   2.089407e-04   1.155428e-10   0.000000e+00  15               0
+           NFLX    1.522181e-08  1.522829e-08  4.620422e-10  2.486247e-10  1.272579e-08  4.358924e-10   1.375042e-05   4.538451e-24  2.867914e-198   7               0
+           JPM    -1.789223e-11 -2.543014e-11  2.483136e-09  2.975948e-10  2.483136e-09  2.975948e-10   3.641628e-06   9.145714e-19  -4.548358e-12  10               0
+           BAC     4.641917e-11 -8.538198e-12  7.237748e-10  1.860351e-10  2.304126e-06  2.912602e-10   5.258780e-04   1.657077e-13   0.000000e+00  14               0
+           XOM     3.524077e-12  6.117572e-12  2.483132e-09  2.953306e-10  7.826407e-06  5.628662e-10   1.805370e-04   9.024864e-22   0.000000e+00  13               0
+           CVX    -3.225047e-11  1.647918e-13  2.483132e-09  1.711092e-10  1.179497e-05  3.921330e-10   1.031043e-04   6.763358e-14  -1.197603e-12  10               0
+           UNH     3.568623e-07  3.567963e-07  2.483134e-09  4.041432e-10  2.483134e-09  4.041432e-10   2.277655e-11   3.370034e-56   0.000000e+00  10               0
+           WMT    -2.072575e-11  4.742630e-12  2.483136e-09  4.519420e-10  2.483136e-09  5.527092e-10   6.041202e-05   3.135345e-19  -2.981994e-13  10               0
+           HD     -4.678864e-11 -2.315078e-11  2.483135e-09  2.547327e-10  2.483135e-09  2.430404e-10   9.103106e-07   8.489013e-21  -3.274746e-12  12               0
+           DIS    -5.614890e-12 -1.003445e-11  2.483127e-09  3.104395e-10  2.483127e-09  3.104395e-10   1.453556e-15   8.593697e-25  -3.097409e-12  11               0
+           UBER   -3.981013e-11 -2.388283e-11  2.483132e-09  4.047928e-10  2.028608e-06  6.566269e-10   1.171489e-05   3.917962e-20  -3.811135e-12  10               0
+           SHOP   -7.368309e-11  2.773823e-14  2.483078e-09  2.142188e-10  1.215795e-08  2.549821e-10   1.106359e-03   3.207250e-25  -2.936811e-12  12               0
+           ABNB    8.095178e-11  1.887275e-12  2.483133e-09  6.373956e-10  2.483133e-09  6.373955e-10   4.434216e-07   1.815199e-40   0.000000e+00  10               0
+2026-10-30 ^SPX   -1.608370e-10 -9.462312e-11  4.326843e-10  3.564617e-10  4.326843e-10  3.564620e-10   3.830852e-10   4.966479e-26  -1.357460e-12  34               0
+           SPY    -3.122429e-10 -2.958312e-11  2.284368e-09  3.156209e-10  2.284368e-09  3.156211e-10   3.027798e-08   8.141278e-18  -1.041520e-12  21               0
+           AAPL    2.074346e-11 -1.595744e-12  1.204044e-09  4.832039e-10  1.204044e-09  6.381202e-10   3.091133e-14   3.319446e-40   0.000000e+00  13               0
+           QQQ     8.893818e-11 -2.014242e-11  1.182377e-09  3.496132e-10  1.182377e-09  3.928029e-10   3.674107e-09   2.343677e-24   0.000000e+00  19               0
+           XLK    -8.659481e-11 -6.166926e-11  2.483132e-09  1.791213e-09  2.483133e-09  1.906682e-09   4.810125e-14   6.815071e-21  -1.123955e-11   6               0
+           XLE     3.201225e-11 -5.127149e-14  2.483136e-09  8.655108e-10  2.393657e-06  1.366929e-09   2.157742e-07  4.953795e-170   0.000000e+00   9               0
+           XLF     2.728607e-11 -5.264504e-13  2.483137e-09  3.462184e-10  3.281447e-08  4.034447e-10   4.091312e-06   6.834309e-20   0.000000e+00  14               0
+           NVDA   -4.831253e-10 -2.120761e-11  4.852063e-10  1.233837e-10  6.965301e-06  7.206403e-09   1.108260e-03   1.304886e-07  -3.261321e-13  15               0
+           MSFT   -9.218330e-11  6.938512e-12  6.559300e-10  1.617806e-10  5.813221e-08  1.888920e-10   2.430562e-05   2.011752e-12  -2.413288e-14  14               0
+           AMD    -1.770993e-10  4.001660e-14  2.483136e-09  1.404602e-10  1.081937e-08  6.863662e-10   2.088349e-04   3.248761e-05  -2.630106e-12  12               0
+           AVGO   -1.208812e-11 -7.788215e-14  7.087144e-10  4.892248e-10  4.172567e-05  5.298587e-10   6.526366e-10   9.440430e-30  -7.374876e-15  12               0
+           MU     -1.962818e-10 -1.110917e-13  1.636227e-10  8.776890e-11  1.707034e-03  9.566981e-05   2.561491e-03   5.028779e-06  -6.060723e-14  10               2
+           INTC    1.631416e-01  1.631416e-01  4.538721e-10  3.112977e-10  4.538723e-10  3.109701e-10   3.773186e-13   1.161452e-18   1.278851e-34  11               0
+           PLTR    2.398363e-12 -1.632028e-13  1.478770e-10  1.132456e-10  2.632735e-05  9.659273e-09   9.279681e-04   5.081152e-06   8.816235e-39  12               0
+           CSCO   -1.431686e-10 -7.765961e-12  2.483125e-09  5.106635e-10  2.483125e-09  5.082508e-10   1.520286e-05   2.061340e-18  -5.306957e-11   7               0
+           PANW    3.029217e-01  3.029217e-01  2.483033e-09  8.418795e-10  2.483033e-09  8.418795e-10   5.621934e-22   1.660234e-26  2.636339e-168   7               0
+           AMAT    5.673635e-11  4.386456e-12  2.483124e-09  5.270970e-10  1.101990e-06  9.419652e-10   1.364730e-03   2.276351e-38  4.856919e-209  11               0
+           LRCX   -5.419595e-11  1.571659e-13  2.483074e-09  3.218695e-10  4.822649e-04  4.941717e-10   7.853598e-05   5.791373e-20  -4.906336e-13  10               0
+           ORCL   -1.458595e-10 -1.663737e-11  6.147500e-10  1.679232e-10  8.375221e-05  1.037746e-07   1.017697e-05   4.961429e-10  -4.596271e-13  11               0
+           CRM     5.451167e-03  5.451167e-03  2.483137e-09  1.642225e-09  2.483137e-09  1.642225e-09   2.758565e-09   7.316023e-28   0.000000e+00  12               0
+           IBM     2.497590e-01  2.497590e-01  2.483135e-09  1.723883e-09  2.483135e-09  1.723883e-09   1.504295e-32   9.677705e-45  5.869912e-298  12               0
+           AMZN    1.339668e-01  1.339668e-01  1.042804e-09  4.713075e-10  1.042804e-09  4.713077e-10   2.941291e-16   2.823870e-31   1.326579e-85  12               0
+           META    3.258834e-07  3.258586e-07  7.167824e-10  2.177540e-10  5.971436e-07  3.498768e-10   5.246645e-05   5.023854e-24  2.966079e-200  15               0
+           GOOGL  -5.029613e-11  1.676318e-11  7.013203e-10  3.351102e-10  8.793605e-06  4.267582e-10   1.599154e-10   7.251247e-25  -3.257047e-13  13               0
+           TSLA   -2.669344e-10  1.654371e-13  2.973000e-10  1.834897e-10  1.774667e-04  3.348931e-09   8.589954e-08   5.725557e-12  -2.159966e-12  10               0
+           NFLX    1.688945e-08  1.683823e-08  6.115928e-10  4.277323e-10  6.115928e-10  4.277318e-10   5.147108e-15   7.089083e-32  2.007498e-313   7               0
+           JPM    -7.789776e-11 -6.059369e-11  2.483135e-09  1.034196e-09  4.589197e-08  1.383769e-09   4.024413e-04   3.906806e-50  -1.377803e-11  10               0
+           BAC    -1.313045e-10 -8.548748e-11  5.026977e-10  2.723700e-10  1.478303e-06  3.132455e-10   4.044542e-11   1.119736e-18  -4.471135e-11  14               0
+           XOM    -6.658799e-12  2.882881e-12  2.483135e-09  2.483128e-09  3.107215e-06  2.483128e-09   6.897755e-11   6.576620e-54  -6.040269e-13  12               0
+           CVX    -6.414680e-11 -1.278783e-12  2.483132e-09  1.472244e-09  2.483132e-09  1.462080e-09   1.253461e-05   3.554713e-70  -9.626073e-12  10               0
+           UNH     9.762365e-12  2.552840e-12  8.632095e-10  3.266936e-10  8.632095e-10  4.278452e-10   1.325857e-11   6.998117e-22  1.472294e-306  10               0
+           WMT    -3.558799e-11 -2.745790e-13  4.743086e-10  2.637754e-10  1.594550e-09  2.731397e-10   2.221569e-05   8.130899e-16  -3.183454e-12  10               0
+           HD     -5.644635e-11 -1.160183e-14  2.483136e-09  4.192983e-10  2.483136e-09  3.482333e-10   2.317125e-05   5.788595e-25  -7.784054e-12  12               0
+           DIS    -8.502921e-13 -1.284195e-11  8.196657e-10  4.153791e-10  8.196654e-10  4.152840e-10   1.940421e-06   1.535311e-56  -5.011175e-14  10               0
+           UBER   -4.763250e-11 -3.324347e-11  2.483105e-09  2.671392e-10  4.979580e-05  1.610727e-09   7.314338e-10   6.777282e-17  -1.365768e-12  10               0
+           SHOP   -3.108162e-11  4.812123e-15  2.483098e-09  2.040451e-10  8.759083e-09  4.499816e-10   7.255063e-04   7.396648e-57  -1.311675e-12  10               0
+           ABNB   -3.733442e-11 -1.754943e-12  2.483084e-09  3.122069e-10  2.483084e-09  3.122069e-10   5.372851e-05   3.888076e-36  -2.500066e-13   9               0
+```
+
+Overall:
+
+```
+              n         min_g     fit_min_g   max_int_err  max_mean_err  max_tail_mass   min_density  n_density_fail
+day                                                                                                                 
+2026-10-28   74 -1.933464e-10 -6.291318e-11  6.973198e-10  4.899344e-08   3.669178e-08 -3.815737e-12               0
+2026-10-29  493 -3.045119e-10 -5.570506e-11  2.483137e-09  3.588039e-04   2.597934e-03 -5.155868e-12               0
+2026-10-30  446 -4.831253e-10 -9.462312e-11  2.483137e-09  1.707034e-03   2.561491e-03 -5.306957e-11               2
+slices with min_g < -1e-10 from the CSV parameters: 37 ; with fit_min_g (full precision, from the fit) < -1e-10: 0
+```
+
+**Every `density_fail` slice.** Both are long-dated MU refits on 2026-10-30 whose mean misses `int_tol`. The integral itself is within 1e-10. The mean is a trapezoid sum over [−10, 10] with nothing added for the mass beyond, as instruction 05b part B specifies. That missing mass, E[e^k; k > 10] = ∫ e^k p_k dk from 10 by `quad`, equals the mean error to 4 digits (1.086010e-3 against −1.086e-3, and 1.707023e-3 against −1.707e-3), although P(k > 10) is only 8.6e-9 and 1.4e-8. Both slices have no tail table and no PIT value.
+
+```
+            day ticker      expiry         T           F       int_err  mean_rel_err  tail_mass         min_g   min_density  route        a         b       rho         m         s
+744  2026-10-30     MU  2027-08-20  0.805483  914.076736  7.324674e-11     -0.001086   0.000017 -1.962818e-10 -6.060723e-14  refit -1.27009  0.621676  0.248182  0.907303  2.484388
+745  2026-10-30     MU  2027-09-17  0.882195  917.250484  8.779288e-11     -0.001707   0.000004  3.886322e-11  2.838142e-14  refit -0.87983  0.587823  0.327004  0.964327  2.026046
+```
+
+**The smallest g on the acceptance grid.** From the CSV parameters, 37 accepted slices are below −1e-10, and the smallest is −4.8e-10. From the fit's full-precision parameters, none is below −1e-10 (O-39):
+
+```
+            day ticker      expiry         T  route         min_g     fit_min_g   min_density
+676  2026-10-30   NVDA  2026-12-04  0.096010  refit -4.831253e-10 -2.120761e-11 -3.117776e-13
+679  2026-10-30   NVDA  2027-02-19  0.306969  refit -4.416991e-10 -5.656448e-13 -2.049825e-14
+612  2026-10-30    SPY  2027-01-15  0.211080  refit -3.122429e-10 -6.649167e-12 -1.041520e-12
+95   2026-10-29   ^SPX  2026-12-03  0.096061  refit -3.045119e-10 -5.570506e-11 -3.767757e-12
+881  2026-10-30   TSLA  2026-12-04  0.096004  refit -2.669344e-10  1.287789e-12 -2.159966e-12
+118  2026-10-29    SPY  2026-12-04  0.098800  refit -2.455816e-10 -2.676906e-11 -2.198819e-12
+682  2026-10-30   NVDA  2027-05-21  0.556169  refit -2.358684e-10  6.609296e-15 -7.713262e-16
+607  2026-10-30    SPY  2026-11-27  0.076833  refit -2.294381e-10  1.694054e-11 -6.762113e-14
+675  2026-10-30   NVDA  2026-11-27  0.076832  refit -2.128929e-10 -1.205126e-12 -3.261321e-13
+744  2026-10-30     MU  2027-08-20  0.805483  refit -1.962818e-10  1.233041e-14 -6.060723e-14
+```
+
+The largest mean errors:
+
+```
+            day ticker      expiry         T  mean_rel_err     tail_mass       int_err density_status
+745  2026-10-30     MU  2027-09-17  0.882195     -0.001707  3.639160e-06  8.779288e-11   density_fail
+744  2026-10-30     MU  2027-08-20  0.805483     -0.001086  1.664822e-05  7.324674e-11   density_fail
+742  2026-10-30     MU  2027-06-17  0.630140     -0.000830  1.466940e-05  8.729906e-11             ok
+803  2026-10-30   LRCX  2027-09-17  0.882193     -0.000482  6.561304e-09  1.909113e-10             ok
+741  2026-10-30     MU  2027-05-21  0.556168     -0.000469  6.418399e-06  8.774492e-11             ok
+264  2026-10-29     MU  2027-03-19  0.386353     -0.000359  4.382129e-05  6.752710e-11             ok
+263  2026-10-29     MU  2027-02-19  0.309755     -0.000212  1.637316e-04  5.974310e-11             ok
+888  2026-10-30   TSLA  2027-09-17  0.882191     -0.000177  8.589954e-08  8.547629e-11             ok
+739  2026-10-30     MU  2027-03-19  0.383565     -0.000129  2.008677e-07  1.168761e-10             ok
+811  2026-10-30   ORCL  2027-04-16  0.460275     -0.000084  1.497849e-09  3.219764e-10             ok
+```
+
+**O-37 (a) on the fixture day** (`test_nonnegative_when_butterfly_passes`, passes). Per accepted slice on the 200,001-point grid: the smallest g, the smallest and largest p_k, and their ratio. Every g ≥ −1e-10, and every p_k ≥ −1e-10 × the slice's largest p_k:
+
+```
+   ticker      expiry         min_g        min_p_k    max_p_k   min_over_max
+0    ^SPX  2026-10-29  5.287970e-03   0.000000e+00  42.111648   0.000000e+00
+1    ^SPX  2026-10-30  1.642540e-05   1.207292e-80  35.929568   3.360164e-82
+2    ^SPX  2026-11-02  4.185490e-06   8.907070e-75  31.657902   2.813538e-76
+3    ^SPX  2026-11-03  6.342057e-06   2.733963e-68  28.529864   9.582812e-70
+4    ^SPX  2026-11-04  3.868013e-06   1.207217e-60  24.585540   4.910273e-62
+5    ^SPX  2026-11-05  4.677019e-06   6.611395e-60  22.996230   2.874991e-61
+6    ^SPX  2026-11-06  3.565376e-09   4.478982e-58  21.611725   2.072478e-59
+7    ^SPX  2026-11-09 -1.779889e-12  -4.069147e-14  20.277009  -2.006779e-15
+8    ^SPX  2026-11-10  2.274547e-10   3.102057e-54  19.038562   1.629355e-55
+9    ^SPX  2026-11-11 -3.962015e-11  -7.907174e-13  18.307662  -4.319052e-14
+10   ^SPX  2026-11-12  6.315429e-07   3.742525e-52  17.623094   2.123648e-53
+11   ^SPX  2026-11-13  5.857453e-09   8.757986e-51  17.087823   5.125279e-52
+12   ^SPX  2026-11-16 -3.921877e-12  -7.129992e-14  16.313236  -4.370679e-15
+13   ^SPX  2026-11-17  3.882228e-09   3.641277e-49  15.848317   2.297580e-50
+14   ^SPX  2026-11-18 -6.143866e-11  -1.033956e-12  15.133772  -6.832111e-14
+15   ^SPX  2026-11-19 -5.850043e-13  -1.151446e-14  14.711745  -7.826709e-16
+16   ^SPX  2026-11-20 -2.657735e-13  -5.433080e-15  14.216675  -3.821625e-16
+17   ^SPX  2026-11-23  9.672332e-13   4.361706e-44  13.865881   3.145639e-45
+18   ^SPX  2026-11-24  5.694777e-09   2.149563e-43  13.562602   1.584919e-44
+19   ^SPX  2026-11-25  2.591118e-11   3.441827e-43  13.258340   2.595971e-44
+20   ^SPX  2026-11-27  1.726839e-09   3.543378e-42  13.073921   2.710264e-43
+21   ^SPX  2026-11-30  4.168654e-08   6.900112e-41  12.762049   5.406743e-42
+22   ^SPX  2026-12-01  6.193657e-14   3.961678e-41  12.543198   3.158428e-42
+23   ^SPX  2026-12-03  1.267507e-12   7.377958e-40  11.950481   6.173775e-41
+24   ^SPX  2026-12-04  3.827778e-09   2.563466e-38  11.674457   2.195791e-39
+25   ^SPX  2026-12-11  6.163611e-12   3.928542e-36  10.498945   3.741844e-37
+26   ^SPX  2026-12-18  1.668165e-09   2.389309e-34   9.698157   2.463674e-35
+27   ^SPX  2026-12-31 -2.012591e-12  -3.155132e-14   8.752928  -3.604659e-15
+28   ^SPX  2027-01-15 -9.356689e-12  -1.348919e-13   7.857549  -1.716717e-14
+29   ^SPX  2027-01-29  3.745647e-09   1.188111e-27   7.167160   1.657715e-28
+30   ^SPX  2027-02-19  2.005712e-10   1.943929e-25   6.338194   3.067008e-26
+31   ^SPX  2027-02-26  2.801705e-11   4.935712e-25   6.150455   8.024955e-26
+32   ^SPX  2027-03-19  6.478348e-11   2.528799e-23   5.564788   4.544286e-24
+33   ^SPX  2027-03-31 -1.691841e-12  -1.579962e-14   5.402021  -2.924761e-15
+34   ^SPX  2027-06-30  1.498241e-10   6.067756e-19   4.069673   1.490969e-19
+35   ^SPX  2027-09-30  8.373836e-12   8.106446e-17   3.425969   2.366176e-17
+36    SPY  2026-10-29 -6.291318e-11  -5.284806e-12  39.160437  -1.349527e-13
+37    SPY  2026-10-30  2.076078e-06   0.000000e+00  32.218574   0.000000e+00
+38    SPY  2026-11-02  3.257273e-03  8.399116e-323  28.777140  4.940656e-324
+39    SPY  2026-11-03  1.653189e-02  4.310031e-168  26.789488  1.608852e-169
+40    SPY  2026-11-04  2.547377e-02  5.111051e-124  23.491555  2.175697e-125
+41    SPY  2026-11-05  2.629610e-02   1.490320e-99  22.514983  6.619235e-101
+42    SPY  2026-11-06  4.523154e-02  8.765273e-112  20.654395  4.243781e-113
+43    SPY  2026-11-13  1.382446e-02   1.181985e-62  16.656027   7.096439e-64
+44    SPY  2026-11-20  9.544750e-03   3.524207e-49  14.171772   2.486779e-50
+45    SPY  2026-11-27  5.155282e-07   3.412925e-40  12.874356   2.650948e-41
+46    SPY  2026-11-30  1.643768e-09   8.574715e-40  12.521174   6.848172e-41
+47    SPY  2026-12-04  5.350487e-03   8.645277e-39  11.434012   7.561018e-40
+48    SPY  2026-12-18  1.233194e-09   4.256312e-33   9.519306   4.471242e-34
+49    SPY  2026-12-31  8.010909e-08   7.254837e-32   8.833422   8.212940e-33
+50    SPY  2027-01-15  3.399065e-10   9.202965e-28   7.481048   1.230171e-28
+51    SPY  2027-01-29  9.117780e-03   1.564307e-29   7.173857   2.180566e-30
+52    SPY  2027-02-19 -4.709190e-11  -4.361356e-13   6.213238  -7.019457e-14
+53    SPY  2027-02-26  1.829288e-01  5.035739e-110   6.035428  8.343632e-111
+54    SPY  2027-03-19  1.080498e-10   2.532479e-22   5.366074   4.719426e-23
+55    SPY  2027-03-31  4.926914e-10   1.174101e-22   5.269669   2.228035e-23
+56    SPY  2027-06-17 -1.382727e-12  -4.271916e-15   3.972488  -1.075376e-15
+57    SPY  2027-06-30  2.308578e-01   6.986839e-82   4.105473   1.701835e-82
+58    SPY  2027-09-17  2.224040e-12   1.764337e-16   3.219276   5.480540e-17
+59    SPY  2027-09-30  2.377759e-01   0.000000e+00   3.222140   0.000000e+00
+60   AAPL  2026-10-30  4.139101e-02  2.295874e-118  20.917207  1.097601e-119
+61   AAPL  2026-11-04  2.583744e-01   0.000000e+00   8.356207   0.000000e+00
+62   AAPL  2026-11-06  5.157991e-07   7.338160e-36   7.481769   9.808054e-37
+63   AAPL  2026-11-13  1.015348e-12   1.345805e-77   6.892148   1.952665e-78
+64   AAPL  2026-11-20  5.271356e-11   2.058630e-50   6.354456   3.239663e-51
+65   AAPL  2026-11-27  1.366340e-08   8.169379e-41   5.798736   1.408821e-41
+66   AAPL  2026-12-04 -4.480895e-11  -2.509318e-12   5.437016  -4.615248e-13
+67   AAPL  2026-12-18  1.252142e-10   5.435485e-41   4.743297   1.145930e-41
+68   AAPL  2027-01-15  5.205524e-11   3.329258e-30   3.933729   8.463365e-31
+69   AAPL  2027-02-19  2.495289e-01   2.696104e-57   3.143681   8.576265e-58
+70   AAPL  2027-03-19  1.695461e-01   1.087884e-33   2.774220   3.921405e-34
+71   AAPL  2027-04-16  2.685415e-01  1.973892e-142   2.582020  7.644756e-143
+72   AAPL  2027-06-17 -1.258910e-12  -2.327312e-15   2.077808  -1.120080e-15
+73   AAPL  2027-09-17  6.719555e-13   8.479739e-16   1.738252   4.878313e-16
+smallest g np.float64(-6.291318160878134e-11), smallest p_k / largest p_k np.float64(-4.615248048216364e-13)
+```
+
+**The 30-day `^SPX` tail table on the last day** (2026-10-30, the 2026-11-30 slice, 31 days):
+
+```
+^SPX slice nearest 30 days on 2026-10-30: 2026-11-30, T = np.float64(0.08505321942), F = np.float64(7578.588312520011)
+              day ticker      expiry         T            F   K_min   K_max  measure   move            x      prob  extrapolated
+11720  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below -0.200  6062.870650  0.012159         False
+11721  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below -0.100  6820.729481  0.043759         False
+11722  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below -0.050  7199.658897  0.120801         False
+11723  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below -0.025  7389.123605  0.220167         False
+11724  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below  0.025  7768.053020  0.660552         False
+11725  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below  0.050  7957.517728  0.883908         False
+11726  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below  0.100  8336.447144  0.996446         False
+11727  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    below  0.200  9094.305975  0.999975          True
+11728  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above -0.200  6062.870650  0.987841         False
+11729  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above -0.100  6820.729481  0.956241         False
+11730  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above -0.050  7199.658897  0.879199         False
+11731  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above -0.025  7389.123605  0.779833         False
+11732  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above  0.025  7768.053020  0.339448         False
+11733  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above  0.050  7957.517728  0.116092         False
+11734  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above  0.100  8336.447144  0.003554         False
+11735  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0    above  0.200  9094.305975  0.000025          True
+11736  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0  abs_log  0.025          NaN  0.557923         False
+11737  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0  abs_log  0.050          NaN  0.232496         False
+11738  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0  abs_log  0.100          NaN  0.050097         False
+11739  2026-10-30   ^SPX  2026-11-30  0.085053  7578.588313  3400.0  8580.0  abs_log  0.200          NaN  0.014691          True
+```
+
+tail rows 20220 over 1011 slices; probabilities from np.float64(8.307594190904654e-206) to np.float64(1.0).
+
+**The PIT rows.** The last close in `close.parquet` and `index.parquet` is 2026-10-29, so the expiries covered are `^SPX` and SPY 2026-10-29, from the fixture day. S_realised is the unadjusted close (`^SPX` from `^GSPC`):
+
+```
+PIT: expiries on or before the last close 2026-10-29
+  ticker      expiry         day         T            F   S_realised         u status
+0    SPY  2026-10-29  2026-10-28  0.003308   770.453589   769.359985  0.411954     ok
+1   ^SPX  2026-10-29  2026-10-28  0.003309  7731.925259  7720.390137  0.411159     ok
+```
+
+**Analytic against finite-difference density.** The fixture test with the 5e-3 bound (`test_analytic_vs_fd`) passes. The largest gap is 4.48e-5 (SPY 2026-10-29), which is 1.05e-3 of its peak:
+
+```
+   ticker      expiry         T   max_abs_gap     K_at_max  q_at_max  max_rel_gap_to_peak
+0    ^SPX  2026-10-29  0.003309  5.732944e-06  7749.316890  0.005423             0.001054
+1    ^SPX  2026-10-30  0.006048  3.922696e-06  7759.689898  0.004616             0.000846
+2    ^SPX  2026-11-02  0.014382  2.723844e-06  7767.275456  0.004063             0.000668
+3    ^SPX  2026-11-03  0.017121  2.004111e-06  7773.145085  0.003659             0.000545
+4    ^SPX  2026-11-04  0.019861  1.286006e-06  7782.732260  0.003146             0.000407
+5    ^SPX  2026-11-05  0.022601  1.058412e-06  7791.596856  0.002937             0.000358
+6    ^SPX  2026-11-06  0.025340  8.857224e-07  7800.473817  0.002758             0.000319
+7    ^SPX  2026-11-09  0.033560  7.360790e-07  7807.248987  0.002585             0.000283
+8    ^SPX  2026-11-10  0.036299  6.105950e-07  7816.846234  0.002421             0.000250
+9    ^SPX  2026-11-11  0.039039  5.444012e-07  7820.688435  0.002328             0.000232
+10   ^SPX  2026-11-12  0.041779  4.862680e-07  7826.797875  0.002239             0.000215
+11   ^SPX  2026-11-13  0.044518  4.451636e-07  7832.943608  0.002168             0.000204
+12   ^SPX  2026-11-16  0.052738  3.876410e-07  7838.259930  0.002070             0.000186
+13   ^SPX  2026-11-17  0.055477  3.564587e-07  7844.223523  0.002008             0.000176
+14   ^SPX  2026-11-18  0.058217  3.106025e-07  7852.711542  0.001914             0.000161
+15   ^SPX  2026-11-19  0.060957  2.859736e-07  7856.104861  0.001859             0.000152
+16   ^SPX  2026-11-20  0.063696  2.572454e-07  7858.464239  0.001797             0.000142
+17   ^SPX  2026-11-23  0.071916  2.396247e-07  7865.891122  0.001751             0.000136
+18   ^SPX  2026-11-24  0.074655  2.244253e-07  7868.710282  0.001714             0.000130
+19   ^SPX  2026-11-25  0.077395  2.098336e-07  7877.173824  0.001672             0.000124
+20   ^SPX  2026-11-27  0.082874  2.013538e-07  7880.083904  0.001649             0.000121
+21   ^SPX  2026-11-30  0.091094  1.880464e-07  7883.282560  0.001610             0.000116
+22   ^SPX  2026-12-01  0.093833  1.792173e-07  7891.378949  0.001579             0.000112
+23   ^SPX  2026-12-03  0.099313  1.542748e-07  7898.336598  0.001503             0.000102
+24   ^SPX  2026-12-04  0.102052  1.434956e-07  7900.327761  0.001469             0.000097
+25   ^SPX  2026-12-11  0.121230  1.043380e-07  7928.458646  0.001316             0.000078
+26   ^SPX  2026-12-18  0.140409  8.187270e-08  7952.238558  0.001211             0.000067
+27   ^SPX  2026-12-31  0.176025  5.989819e-08  7984.398996  0.001090             0.000054
+28   ^SPX  2027-01-15  0.217121  4.304380e-08  8031.618729  0.000973             0.000044
+29   ^SPX  2027-01-29  0.255477  3.235994e-08  8065.955704  0.000884             0.000036
+30   ^SPX  2027-02-19  0.313011  2.204749e-08  8115.630269  0.000778             0.000028
+31   ^SPX  2027-02-26  0.332189  2.015775e-08  8138.370243  0.000752             0.000026
+32   ^SPX  2027-03-19  0.389609  1.475021e-08  8181.685751  0.000678             0.000022
+33   ^SPX  2027-03-31  0.422486  1.354378e-08  8219.529711  0.000654             0.000020
+34   ^SPX  2027-06-30  0.671801  5.596657e-09  8412.725345  0.000483             0.000011
+35   ^SPX  2027-09-30  0.923856  3.284706e-09  8601.975680  0.000398             0.000008
+36    SPY  2026-10-29  0.003308  4.481788e-05   773.240095  0.050317             0.000884
+37    SPY  2026-10-30  0.006047  2.538769e-05   774.117056  0.041359             0.000609
+38    SPY  2026-11-02  0.014381  1.901977e-05   774.691037  0.036955             0.000511
+39    SPY  2026-11-03  0.017120  1.578310e-05   775.300513  0.034369             0.000456
+40    SPY  2026-11-04  0.019860  1.078665e-05   776.332685  0.030074             0.000356
+41    SPY  2026-11-05  0.022600  9.731477e-06   776.815587  0.028811             0.000335
+42    SPY  2026-11-06  0.025340  7.467324e-06   777.263439  0.026437             0.000280
+43    SPY  2026-11-13  0.044518  4.056054e-06   780.548469  0.021195             0.000190
+44    SPY  2026-11-20  0.063696  2.547781e-06   782.957265  0.017988             0.000140
+45    SPY  2026-11-27  0.082874  1.918967e-06   784.669437  0.016314             0.000117
+46    SPY  2026-11-30  0.091093  1.766770e-06   785.333838  0.015860             0.000110
+47    SPY  2026-12-04  0.102052  1.340290e-06   786.573461  0.014470             0.000092
+48    SPY  2026-12-18  0.140408  7.711379e-07   791.930586  0.011947             0.000064
+49    SPY  2026-12-31  0.176024  6.228499e-07   795.289757  0.011045             0.000056
+50    SPY  2027-01-15  0.217120  3.641209e-07   798.319061  0.009332             0.000039
+51    SPY  2027-01-29  0.255476  3.285380e-07   802.233316  0.008903             0.000037
+52    SPY  2027-02-19  0.313011  2.073554e-07   806.720665  0.007674             0.000027
+53    SPY  2027-02-26  0.332189  1.857948e-07   799.707534  0.007547             0.000025
+54    SPY  2027-03-19  0.389609  1.301412e-07   812.534745  0.006584             0.000020
+55    SPY  2027-03-31  0.422485  1.248819e-07   816.894960  0.006426             0.000019
+56    SPY  2027-06-17  0.636184  5.020698e-08   830.471396  0.004776             0.000010
+57    SPY  2027-06-30  0.671800  5.994775e-08   823.784350  0.004983             0.000012
+58    SPY  2027-09-17  0.888239  2.567015e-08   843.955734  0.003813             0.000007
+59    SPY  2027-09-30  0.923855  2.728427e-08   816.500952  0.003892             0.000007
+60   AAPL  2026-10-30  0.006045  1.641780e-05   347.605684  0.059966             0.000272
+61   AAPL  2026-11-04  0.019858  1.327118e-06   358.956624  0.021228             0.000056
+62   AAPL  2026-11-06  0.025337  6.871065e-07   351.247185  0.021273             0.000032
+63   AAPL  2026-11-13  0.044515  5.879753e-07   355.773883  0.019199             0.000030
+64   AAPL  2026-11-20  0.063693  4.676862e-07   355.442424  0.017807             0.000026
+65   AAPL  2026-11-27  0.082871  3.327919e-07   355.614692  0.016268             0.000020
+66   AAPL  2026-12-04  0.102050  2.875939e-07   358.174243  0.015096             0.000019
+67   AAPL  2026-12-18  0.140406  1.890557e-07   359.295557  0.013165             0.000014
+68   AAPL  2027-01-15  0.217118  1.049549e-07   359.595007  0.010936             0.000010
+69   AAPL  2027-02-19  0.313008  5.446125e-08   364.612931  0.008620             0.000006
+70   AAPL  2027-03-19  0.389607  3.547694e-08   364.791754  0.007603             0.000005
+71   AAPL  2027-04-16  0.466319  3.407495e-08   375.681014  0.006844             0.000005
+72   AAPL  2027-06-17  0.636182  1.399471e-08   363.605219  0.005677             0.000002
+73   AAPL  2027-09-17  0.888237  8.113154e-09   362.301656  0.004723             0.000002
+largest |q - q_fd| np.float64(4.481787641776036e-05) (SPY 2026-10-29); largest gap relative to peak density np.float64(0.0010543282336924315)
+```
+
+Measured by step 5.1 on every accepted slice of the 3 days (2,001 strikes over each quoted range, step `bl_dk` × F), **109 of 1,013 slices exceed 5e-3 × peak**: 54 on 2026-10-29, 55 on 2026-10-30 and none on 2026-10-28. 97 of the 109 have s at the `s_min` floor (1e-4), and their peak sits at k = m. The smile there has a near-kink and the density a spike that the step cannot resolve. This is O-38. Every slice over the bound (the first line of the output is the count of accepted slices, then the count over the bound):
+
+```
+             day ticker      expiry         T  max_abs_gap    K_at_max   q_at_max  max_rel_gap_to_peak     k_min     k_max         a         b       rho         m         s      route
+824   2026-10-30    CRM  2027-05-21  0.556165     0.941850  164.990329   1.099772             0.856405 -0.513667  0.458194  0.113154  0.047610 -0.973704 -0.349444  0.000100      refit
+826   2026-10-30    CRM  2027-09-17  0.882193     0.540930  174.986543   0.640644             0.844354 -0.600056  0.498556  0.188326  0.029742 -0.996907 -0.302857  0.000100      first
+471   2026-10-29    XOM  2026-11-13  0.041256     1.253440  171.381712   1.535995             0.816044 -0.071534  0.065667  0.004179  0.013470 -0.934208 -0.063428  0.000100      refit
+816   2026-10-30    CRM  2026-11-13  0.038471     0.575183  215.818858   0.711565             0.808335 -0.138467  0.142945  0.008416  0.008584 -0.999000 -0.062356  0.000100      first
+165   2026-10-29    XLE  2026-12-04  0.098799     2.912559   66.167621   3.613624             0.805994 -0.092988  0.153872  0.006785  0.010705 -0.176744 -0.035951  0.000100      first
+712   2026-10-30    AMD  2026-11-02  0.008338     1.257756  492.999429   1.561839             0.805305 -0.206691  0.143792  0.001887  0.017639 -0.575559 -0.010086  0.000100      first
+364   2026-10-29    CRM  2027-09-17  0.884981     0.514167  175.655696   0.640136             0.803215 -0.640386  0.497447  0.181112  0.037724 -0.774933 -0.300123  0.000100      first
+643   2026-10-30    XLK  2026-12-04  0.096011     2.692007  189.542429   3.361302             0.800882 -0.217465  0.104118  0.007425  0.034033 -0.999000  0.050426  0.000100      first
+830   2026-10-30    IBM  2026-12-04  0.096005     1.070827  268.006326   1.337446             0.800651 -0.161243  0.115011  0.009419  0.019224 -0.664523  0.036129  0.000100      first
+558   2026-10-29   ABNB  2026-11-13  0.041254     0.805937  155.918911   1.006743             0.800539 -0.120302  0.155485  0.011706  0.010711 -0.999000 -0.068202  0.000100      first
+924   2026-10-30    XOM  2026-12-04  0.096003     1.467283  200.130544   1.833107             0.800435 -0.159366  0.088470  0.006972  0.021198 -0.071266  0.064427  0.000100      first
+505   2026-10-29    WMT  2026-11-27  0.079611     1.256534  112.781165   1.573286             0.798668 -0.147315  0.140367  0.008146  0.012113 -0.985061 -0.075854  0.000100      first
+923   2026-10-30    XOM  2026-11-27  0.076825     1.589961  197.217732   1.993609             0.797529 -0.128228  0.159454  0.005333  0.018927 -0.181276  0.050147  0.000100      first
+516   2026-10-29     HD  2026-12-04  0.098789     0.737927  359.211450   0.925967             0.796926 -0.121378  0.108638  0.008643  0.026639  0.238001  0.092647  0.000100      first
+560   2026-10-29   ABNB  2026-11-27  0.079610     0.652245  159.987263   0.819340             0.796062 -0.177432  0.127949  0.014806  0.008702 -0.757214 -0.044001  0.000100      first
+642   2026-10-30    XLK  2026-11-27  0.076833     2.662546  188.627480   3.347279             0.795436 -0.182865  0.104817  0.005880  0.031138 -0.999000  0.046255  0.000100      first
+502   2026-10-29    WMT  2026-11-06  0.022077     1.874023  118.724840   2.363798             0.792801 -0.072011  0.052631  0.001132  0.005772 -0.300687 -0.022601  0.000100      refit
+896   2026-10-30    JPM  2026-11-06  0.019291     0.788490  347.821312   0.995503             0.792052 -0.085100  0.043378  0.000863  0.008515 -0.530314  0.030012  0.000100      refit
+503   2026-10-29    WMT  2026-11-13  0.041255     1.576110  118.084970   1.991019             0.791610 -0.081526  0.082777  0.002216  0.006717 -0.594439 -0.028638  0.000100      first
+356   2026-10-29    CRM  2026-11-27  0.079615     0.514134  212.341320   0.651453             0.789211 -0.166143  0.213347  0.013826  0.011381 -0.592130 -0.080915  0.000100      first
+183   2026-10-29   NVDA  2026-10-30  0.002794     1.645957  216.562435   2.086488             0.788865 -0.051129  0.031759  0.000295  0.005875 -0.022040  0.016006  0.000100      refit
+935   2026-10-30    CVX  2026-11-27  0.076824     0.486743  252.529675   0.617174             0.788664 -0.112893  0.100681  0.005669  0.009391 -0.537022  0.071524  0.000100      first
+169   2026-10-29    XLE  2027-09-30  0.920602     2.236284   60.999765   2.840612             0.787254 -0.314544  0.196281  0.062075  0.030498 -0.760112 -0.135456  0.000100      first
+368   2026-10-29    IBM  2026-11-27  0.079615     0.789286  271.508784   1.004641             0.785640 -0.152967  0.123287  0.007049  0.015772 -0.250918  0.057379  0.000100      first
+658   2026-10-30    XLF  2026-11-13  0.038476     8.145419   57.299354  10.370013             0.785478 -0.094812  0.049582  0.001066  0.011180 -0.492786  0.011871  0.000100      refit
+900   2026-10-30    JPM  2026-12-04  0.096003     0.555592  356.108432   0.707613             0.785164 -0.086831  0.076494  0.004206  0.011936 -0.999000  0.051851  0.000100      first
+474   2026-10-29    XOM  2026-12-04  0.098790     0.572459  191.569499   0.729341             0.784900 -0.133210  0.089933  0.007667  0.007168 -0.948301  0.046877  0.000100      first
+656   2026-10-30    XLF  2026-11-04  0.013818     5.188784   57.645498   6.618024             0.784038 -0.037550  0.024692  0.000361  0.005732 -0.376205  0.018569  0.000100      refit
+828   2026-10-30    IBM  2026-11-20  0.057649     0.966456  275.521060   1.236692             0.781485 -0.183665  0.149479  0.005692  0.020873 -0.059875  0.064335  0.000100      first
+559   2026-10-29   ABNB  2026-11-20  0.060432     0.817875  159.984116   1.047508             0.780782 -0.176652  0.141802  0.013130  0.011712 -0.669253 -0.043254  0.000100      first
+987   2026-10-30   UBER  2026-11-27  0.076823     1.607586   73.999617   2.059585             0.780539 -0.101973  0.189937  0.015778  0.017243  0.399024  0.124566  0.000100      refit
+827   2026-10-30    IBM  2026-11-06  0.019293     1.200337  266.074018   1.537958             0.780475 -0.104854  0.098745  0.001907  0.012615  0.072423  0.030003  0.000100      first
+348   2026-10-29   ORCL  2027-04-16  0.463063     1.014061  112.458022   1.299483             0.780357 -0.688614  0.456518  0.147648  0.043656 -0.898363 -0.214583  0.000100      first
+897   2026-10-30    JPM  2026-11-13  0.038469     0.863515  347.998968   1.106974             0.780068 -0.101792  0.064001  0.001698  0.011302 -0.707851  0.030121  0.000100      first
+528   2026-10-29    DIS  2026-12-04  0.098789     1.701964  119.096755   2.190748             0.776888 -0.096291  0.092609  0.009235  0.018527  0.061088  0.068497  0.000100      first
+493   2026-10-29    UNH  2026-11-13  0.041256     0.419841  424.540376   0.541560             0.775244 -0.126171  0.096973  0.003476  0.009232 -0.486900  0.038758  0.000100      first
+354   2026-10-29    CRM  2026-11-13  0.041259     0.569360  211.888336   0.735051             0.774586 -0.114862  0.160550  0.007590  0.012644 -0.685415 -0.081854  0.000100      first
+514   2026-10-29     HD  2026-11-20  0.060433     0.195400  337.526861   0.252835             0.772837 -0.174007  0.149393  0.007540  0.003821 -0.955813  0.030868  0.000100      first
+829   2026-10-30    IBM  2026-11-27  0.076827     0.908228  272.816161   1.176732             0.771823 -0.160955  0.132392  0.007119  0.019631 -0.381396  0.054183  0.000100      first
+318   2026-10-29   AMAT  2026-11-06  0.022082     0.277005  450.925691   0.359125             0.771333 -0.188483  0.187995  0.006785  0.010261  0.218687  0.064914  0.000100      first
+485   2026-10-29    CVX  2026-11-27  0.079612     0.701576  242.023681   0.910078             0.770896 -0.094491  0.099665  0.005661  0.011558 -0.400105  0.047467  0.000100      first
+550   2026-10-29   SHOP  2026-12-04  0.098788     0.415788  198.499071   0.539644             0.770486 -0.178282  0.203085  0.043567  0.017785  0.164124  0.170878  0.000100      first
+649   2026-10-30    XLE  2026-11-13  0.038476     1.516802   72.508248   1.971968             0.769182 -0.121875  0.068479  0.003167  0.005023 -0.989979  0.034672  0.000100      refit
+357   2026-10-29    CRM  2026-12-04  0.098794     0.337901  209.981185   0.440623             0.766872 -0.166788  0.230093  0.023418  0.010358 -0.442743 -0.092726  0.000100      first
+936   2026-10-30    CVX  2026-12-04  0.096002     0.565525  248.835529   0.739706             0.764527 -0.113106  0.100468  0.007094  0.011391 -0.340128  0.056546  0.000100      first
+445   2026-10-29    JPM  2026-11-06  0.022079     0.433436  348.362138   0.567430             0.763859 -0.070874  0.046909  0.000984  0.003325 -0.984309  0.014060  0.000100      refit
+930   2026-10-30    XOM  2027-06-17  0.630135     1.021949  202.685064   1.339475             0.762947 -0.545707  0.314494  0.050435  0.040221 -0.574366  0.065428  0.000100      first
+366   2026-10-29    IBM  2026-11-13  0.041259     0.808958  271.939095   1.060425             0.762862 -0.107964  0.088746  0.003861  0.017286  0.064489  0.059570  0.000100      first
+920   2026-10-30    XOM  2026-11-06  0.019290     0.726551  192.891983   0.956844             0.759320 -0.068313  0.065219  0.001639  0.005286 -0.360516  0.029003  0.000100      refit
+307   2026-10-29   PANW  2026-11-13  0.041261     0.127837  418.847793   0.168369             0.759268 -0.195759  0.176917  0.013998  0.006958 -0.026827  0.105152  0.000100      first
+966   2026-10-30     HD  2026-12-04  0.096002     0.176870  347.222972   0.233523             0.757400 -0.111899  0.101023  0.010107  0.005054 -0.999000  0.051066  0.000100      first
+299   2026-10-29   CSCO  2026-12-04  0.098795     0.737135  119.105881   0.975620             0.755556 -0.139067  0.135370  0.018362  0.011767  0.241999  0.087034  0.000100      first
+965   2026-10-30     HD  2026-11-27  0.076824     0.163407  322.848634   0.217775             0.750347 -0.128746  0.101270  0.008828  0.003637 -0.999000 -0.021412  0.000100      first
+131   2026-10-29    QQQ  2026-10-30  0.002795     0.263606  723.754731   0.354131             0.744374 -0.047842  0.025741  0.000135  0.002677 -0.589070  0.013063  0.000100      refit
+151   2026-10-29    XLK  2026-10-30  0.002795     0.712998  191.688883   0.958066             0.744205 -0.023255  0.021905  0.000243  0.002543 -0.999000  0.017675  0.000100  neighbour
+539   2026-10-29   UBER  2026-12-04  0.098789     1.643990   69.033443   2.218196             0.741139 -0.126552  0.130493  0.015737  0.013639 -0.100811  0.047641  0.000100      first
+934   2026-10-30    CVX  2026-11-20  0.057646     0.334624  251.879920   0.451573             0.741019 -0.136786  0.100885  0.004861  0.008027 -0.541808  0.069118  0.000100      first
+330   2026-10-29   LRCX  2026-11-13  0.041260     0.458392  269.159304   0.620252             0.739041 -0.169454  0.180220  0.011991  0.013785 -0.345077  0.055167  0.000100      first
+928   2026-10-30    XOM  2027-03-19  0.383560     0.837458  205.893036   1.135951             0.737230 -0.335305  0.320102  0.029783  0.031668 -0.315677  0.086731  0.000100      first
+167   2026-10-29    XLE  2027-06-30  0.668548     2.274821   67.582086   3.096397             0.734667 -0.479285  0.202166  0.044684  0.032705 -0.337538 -0.027087  0.000100      first
+362   2026-10-29    CRM  2027-05-21  0.558953     0.413901  165.016372   0.565084             0.732459 -0.551136  0.483760  0.110409  0.046586 -0.998920 -0.350444  0.000100      first
+486   2026-10-29    CVX  2026-12-04  0.098790     0.674739  249.902619   0.922567             0.731371 -0.094695  0.099461  0.007019  0.021112  0.287311  0.079317  0.000100      first
+927   2026-10-30    XOM  2027-02-19  0.306962     0.671529  200.898591   0.927830             0.723763 -0.297252  0.199185  0.024094  0.022816 -0.673504  0.063855  0.000100      first
+108   2026-10-29    SPY  2026-10-30  0.002796     0.277512  774.571365   0.388792             0.713779 -0.024649  0.012005  0.000040  0.001741 -0.650846  0.007598  0.000100  neighbour
+922   2026-10-30    XOM  2026-11-20  0.057647     0.712363  202.012548   1.000686             0.711875 -0.127870  0.159812  0.004364  0.018840  0.014209  0.074461  0.000100      first
+298   2026-10-29   CSCO  2026-11-27  0.079617     0.355072  115.017248   0.514152             0.690598 -0.192639  0.175086  0.016939  0.006049 -0.999000  0.052688  0.000100      first
+297   2026-10-29   CSCO  2026-11-20  0.060439     0.365489  119.029479   0.530642             0.688768 -0.249311  0.175572  0.014214  0.007275 -0.999000  0.087355  0.000100      refit
+780   2026-10-30   PANW  2027-05-21  0.556166     0.040904  471.650500   0.007367             0.688644 -0.492529  0.591485  0.182066  0.048587 -0.493720  0.226017  0.000100      first
+786   2026-10-30   AMAT  2026-12-04  0.096006     0.183889  419.960282   0.267090             0.688492 -0.258491  0.201041  0.032677  0.017986 -0.592004  0.077946  0.000100      first
+309   2026-10-29   PANW  2026-11-27  0.079617     0.102099  394.970561   0.148431             0.687857 -0.197319  0.175356  0.029919  0.008019 -0.448683  0.044978  0.000100      first
+652   2026-10-30    XLE  2026-12-04  0.096010     1.074021   71.624222   1.570748             0.683764 -0.114939  0.131921  0.007517  0.007797 -0.420524  0.021268  0.000100      first
+819   2026-10-30    CRM  2026-12-04  0.096006     0.314261  209.974401   0.462938             0.678841 -0.165698  0.196092  0.024135  0.015860 -0.510303 -0.091640  0.000100      first
+775   2026-10-30   CSCO  2027-09-17  0.882194     0.177644  155.842008   0.044806             0.677328 -0.417262  0.470041  0.127925  0.083539  0.803706  0.382784  0.000100      first
+822   2026-10-30    CRM  2027-02-19  0.306964     0.155694  229.943980   0.233331             0.667267 -0.253139  0.352997  0.062521  0.011669 -0.586915 -0.008192  0.000100      first
+331   2026-10-29   LRCX  2026-11-20  0.060438     0.322217  270.569690   0.484071             0.665639 -0.242471  0.227533  0.017264  0.016620 -0.380705  0.059675  0.000100      first
+333   2026-10-29   LRCX  2026-12-04  0.098794     0.216638  275.700278   0.352471             0.614624 -0.243874  0.256901  0.026395  0.017859 -0.203559  0.077199  0.000100      first
+301   2026-10-29   CSCO  2027-01-15  0.213864     0.338445  122.532182   0.557571             0.606999 -0.283233  0.245611  0.029418  0.014603 -0.563604  0.112268  0.000100      first
+1008  2026-10-30   ABNB  2027-01-15  0.211069     0.120825  195.019693   0.199462             0.605754 -0.206428  0.235405  0.028102  0.009964 -0.697605  0.161328  0.000100      first
+925   2026-10-30    XOM  2026-12-18  0.134359     0.426990  198.349007   0.718683             0.594128 -0.224658  0.158334  0.010088  0.017806 -0.462111  0.054654  0.000100      first
+988   2026-10-30   UBER  2026-12-04  0.096001     0.333908   75.707334   0.588108             0.567767 -0.119856  0.201728  0.017364  0.011823  0.416440  0.146656  0.000100      first
+797   2026-10-30   LRCX  2026-11-27  0.076828     0.111707  285.000558   0.202423             0.551852 -0.178359  0.227107  0.022807  0.019741 -0.032166  0.175897  0.000100      first
+769   2026-10-30   CSCO  2026-11-20  0.057651     0.333601   96.168630   0.609641             0.547208 -0.142820  0.262645  0.017092  0.011075 -0.705146 -0.076622  0.000100      first
+564   2026-10-29   ABNB  2027-04-16  0.463057     0.236637  155.833297   0.437397             0.541012 -0.435195  0.257952  0.064821  0.024253 -0.999000 -0.086988  0.000100      first
+929   2026-10-30    XOM  2027-04-16  0.460272     0.298468  201.940194   0.565154             0.528118 -0.414014  0.279133  0.036791  0.029901 -0.616129  0.065736  0.000100      first
+497   2026-10-29    UNH  2026-12-18  0.137146     0.148472  432.164879   0.281816             0.526839 -0.277523  0.200513  0.010668  0.018245 -0.625035  0.054805  0.000100      first
+303   2026-10-29   CSCO  2027-04-16  0.463065     0.131375  123.153038   0.069311             0.513772 -0.385681  0.402776  0.062959  0.022034 -0.556754  0.110003  0.000100      first
+937   2026-10-30    CVX  2026-12-18  0.134359     0.156357  247.085695   0.312502             0.500339 -0.213635  0.174130  0.010522  0.011498 -0.418334  0.049171  0.000100      first
+311   2026-10-29   PANW  2026-12-18  0.137151     0.029279  380.491137   0.016671             0.487220 -0.395016  0.426748  0.050615  0.012430 -0.640774  0.004913  0.000100      first
+823   2026-10-30    CRM  2027-03-19  0.383563     0.062304  215.485499   0.036646             0.479459 -0.405462  0.409046  0.082548  0.020993 -0.665907 -0.076256  0.000100      first
+300   2026-10-29   CSCO  2026-12-18  0.137151     0.216621  123.212023   0.456890             0.474122 -0.251303  0.211320  0.021613  0.015862 -0.065906  0.119857  0.000100      first
+332   2026-10-29   LRCX  2026-11-27  0.079616     0.125532  288.013923   0.271725             0.461983 -0.218475  0.211088  0.020466  0.023086  0.165392  0.121426  0.000100      first
+378   2026-10-29   AMZN  2026-11-04  0.016601     0.027598  298.219744   0.059796             0.461538 -0.256092  0.217195  0.009334  0.018323  0.433640  0.194621  0.000100      refit
+646   2026-10-30    XLK  2027-09-17  0.882198     0.285245  210.024510   0.625806             0.455804 -0.397068  0.212698  0.063803  0.055841 -0.999000  0.121743  0.000100      first
+787   2026-10-30   AMAT  2026-12-18  0.134363     0.058143  451.270368   0.012347             0.455384 -0.525595  0.449784  0.041549  0.033106 -0.201933  0.148030  0.000100      first
+836   2026-10-30    IBM  2027-05-21  0.556165     0.071072  313.041716   0.058247             0.440636 -0.398163  0.294985  0.066923  0.041739 -0.103555  0.183174  0.000100      first
+770   2026-10-30   CSCO  2026-12-18  0.134363     0.051564  133.195054   0.010784             0.412971 -0.201908  0.332175  0.025755  0.018161  0.706689  0.246869  0.000100      first
+838   2026-10-30    IBM  2027-09-17  0.882192     0.083914  315.039150   0.213065             0.393843 -0.463239  0.316920  0.108132  0.042446 -0.154696  0.183409  0.000100      first
+999   2026-10-30   SHOP  2027-01-15  0.211069     0.076186  180.002491   0.194150             0.392409 -0.449336  0.466955  0.073246  0.017351 -0.781463  0.138570  0.000100      refit
+899   2026-10-30    JPM  2026-11-27  0.076825     0.004148  349.301246   0.076644             0.054112 -0.119182  0.090538  0.003350  0.011979 -0.999000  0.032943  0.001688      first
+648   2026-10-30    XLE  2026-11-06  0.019298     0.005598   72.831828   0.225236             0.024827 -0.081981  0.068842  0.001620  0.008097  0.024900  0.039588  0.002333      first
+295   2026-10-29   CSCO  2026-11-06  0.022083     0.003319  113.117896   0.159876             0.020720 -0.116279  0.071184  0.002103  0.010154 -0.148530  0.037473  0.002624      first
+496   2026-10-29    UNH  2026-12-04  0.098790     0.000437  433.407148   0.022595             0.019301 -0.127244  0.139385  0.007891  0.009065 -0.728368  0.058296  0.002599      first
+898   2026-10-30    JPM  2026-11-20  0.057647     0.000798  352.890823   0.048448             0.016449 -0.135559  0.090969  0.002581  0.011935 -0.871022  0.043673  0.002909      first
+689   2026-10-30   AAPL  2026-11-27  0.076831     0.000337  365.017306   0.038501             0.008731 -0.226876  0.135239  0.004883  0.018906 -0.919469  0.056316  0.004071      first
+164   2026-10-29    XLE  2026-11-27  0.079621     0.001426   67.054330   0.167822             0.008492 -0.116917  0.089697  0.005310  0.009278 -0.342694 -0.022270  0.004027      first
+690   2026-10-30   AAPL  2026-12-04  0.096009     0.000318  364.232057   0.037805             0.008408 -0.227605  0.147089  0.005969  0.019497 -0.999000  0.053420  0.004185      first
+369   2026-10-29    IBM  2026-12-04  0.098793     0.000325  270.722370   0.042602             0.007621 -0.153252  0.123001  0.008686  0.020300 -0.176983  0.054250  0.004469      first
+625   2026-10-30    QQQ  2026-11-05  0.016559     0.000267  704.131927   0.037546             0.007096 -0.057474  0.085627  0.001006  0.013510 -0.883676  0.022668  0.004396      first
+152   2026-10-29    XLK  2026-11-06  0.022087     0.000614  192.572686   0.091135             0.006729 -0.103092  0.046849  0.001446  0.007206 -0.998995  0.021672  0.004004      refit
+                 max    median
+day                           
+2026-10-28  0.001054  0.000094
+2026-10-29  0.816044  0.000011
+2026-10-30  0.856405  0.000011
+over bound by day/ticker:
+day
+2026-10-29    54
+2026-10-30    55
+s at floor among over-bound: 97 of 109 ; s at floor among all accepted: 99
+over bound with s > floor:
+            day ticker      expiry         T  max_rel_gap_to_peak         s  route
+152  2026-10-29    XLK  2026-11-06  0.022087             0.006729  0.004004  refit
+164  2026-10-29    XLE  2026-11-27  0.079621             0.008492  0.004027  first
+295  2026-10-29   CSCO  2026-11-06  0.022083             0.020720  0.002624  first
+369  2026-10-29    IBM  2026-12-04  0.098793             0.007621  0.004469  first
+496  2026-10-29    UNH  2026-12-04  0.098790             0.019301  0.002599  first
+625  2026-10-30    QQQ  2026-11-05  0.016559             0.007096  0.004396  first
+648  2026-10-30    XLE  2026-11-06  0.019298             0.024827  0.002333  first
+689  2026-10-30   AAPL  2026-11-27  0.076831             0.008731  0.004071  first
+690  2026-10-30   AAPL  2026-12-04  0.096009             0.008408  0.004185  first
+898  2026-10-30    JPM  2026-11-20  0.057647             0.016449  0.002909  first
+899  2026-10-30    JPM  2026-11-27  0.076825             0.054112  0.001688  first
+988  2026-10-30   UBER  2026-12-04  0.096001             0.567767  0.000100  first
+```
+
+The gap against the step, at 1, 1/10 and 1/100 of `bl_dk` × F, on 4 of them. It shrinks with the step, so the analytic density is not at fault:
+
+```
+bl_dk 0.001
+('2026-10-30', 'CRM', '2027-05-21') s 0.0001 peak at k -0.3494225101088613 m -0.3494438973 | 1: 8.564e-01 0.1: 2.366e-01 0.01: 3.723e-03
+('2026-10-30', 'UBER', '2026-12-04') s 0.0001000116298 peak at k 0.1465763025793934 m 0.1466556403 | 1: 5.678e-01 0.1: 7.436e-02 0.01: 1.041e-03
+('2026-10-30', 'JPM', '2026-11-27') s 0.001687898341 peak at k 0.03286515734935714 m 0.03294318498 | 1: 5.411e-02 0.1: 6.255e-04 0.01: 6.283e-06
+('2026-10-29', 'CSCO', '2026-11-06') s 0.002623655193 peak at k 0.037347064099943546 m 0.03747284613 | 1: 2.072e-02 0.1: 2.208e-04 0.01: 2.237e-06
+```
+
+**Figures**, every one by path:
+- `outputs/figures/spx_smiles_2026-10-28.png` and `outputs/figures/spx_smiles_2026-10-30.png`, the first and last day. `spx_smiles_2026-10-29.png` stays from session 5b, unchanged; it is no longer the last day, so it is not redrawn.
+- `outputs/figures/spx_smile_fits_2026-10-28.png`
+- `outputs/figures/spx_surface_last.png`
+- `outputs/figures/spx_metrics.png`
+- `outputs/figures/spx_density_last.png`, the `^SPX` densities nearest 30, 90 and 180 days on 2026-10-30.
+
+**Prices.** These were not refreshed in session 5c, so the last close is still 2026-10-29 (session 5b-D5). **Fresh-clone check and CI:** after the push, in the commit `session 5c: fresh-clone check and CI`.
+
+### 5c-D3. The 10 largest `tail_mass` values
+
+The wing slopes are b(1 − ρ) on the left and b(1 + ρ) on the right. All 10 are 2027 expiries, and their left wings are 0.66 to 0.97, against a bound of 1.98:
+
+```
+            day ticker      expiry         T  tail_mass  left_wing  right_wing       int_err  mean_rel_err
+269  2026-10-29     MU  2027-08-20  0.808271   0.002598   0.828363    0.260971  8.199619e-11 -1.937557e-08
+743  2026-10-30     MU  2027-07-16  0.709592   0.002561   0.828559    0.165619  8.181411e-11 -1.804319e-08
+270  2026-10-29     MU  2027-09-17  0.884983   0.002509   0.965639    0.591574  4.498713e-11 -2.810217e-05
+267  2026-10-29     MU  2027-06-17  0.632929   0.002447   0.880334    0.480204  6.032375e-11 -5.061222e-06
+740  2026-10-30     MU  2027-04-16  0.460277   0.001931   0.883451    0.435085  5.326628e-11 -3.581196e-07
+266  2026-10-29     MU  2027-05-21  0.558956   0.001812   0.831235    0.405888  6.575052e-11 -5.817834e-07
+793  2026-10-30   AMAT  2027-09-17  0.882194   0.001365   0.756697    0.175536  8.818724e-11 -1.176449e-08
+317  2026-10-29   PANW  2027-09-17  0.884982   0.001249   0.661536    0.043990  1.855023e-10 -1.459313e-08
+684  2026-10-30   NVDA  2027-09-17  0.882197   0.001108   0.865192    0.509863  4.364265e-11 -1.228806e-06
+556  2026-10-29   SHOP  2027-09-17  0.884975   0.001106   0.678490    0.017496  1.520604e-10 -1.215795e-08
+```
+
+### Tests run (session 5c)
+
+`.venv\Scripts\python -m pytest -p socket --disable-socket -q` on Windows at `68e173a` (30 min 54 s): `4523 passed, 5 warnings in 1837.64s (0:30:37)`. `ruff check .`: `All checks passed!`
+
+```
+........................................................................ [  1%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 17%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+...........................................................              [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:894
+  C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Lib\site-packages\_pytest\config\__init__.py:894: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; socket
+    self.import_plugin(arg, consider_entry_points=True)
+
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+tests/test_capture_health.py::test_health_rows_one_per_session
+  C:\Utkarsh\10. Quant Projects\7) Volatility Surface and Event Pricing\Volatility-Surface-and-Event-Pricing\.venv\Lib\site-packages\pandas\core\series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+4523 passed, 5 warnings in 1837.64s (0:30:37)
+
+```
+
+### Fresh-clone check (session 5c)
+
+Run after the push; the output is added in the commit `session 5c: fresh-clone check and CI`.
+
+### Runtime per step (session 5c)
+
+- 5c.1: IV stage for 2026-10-30, 19 min 32 s; surface stage over 3 days, 173 min 21 s; the tests of the changed files, 27 min 28 s.
+- 5.1: `run_all.py --stage density`, 3 min 0 s.
+- 5.2: `run_all.py --stage tails`, 1 min 0 s.
+- Full suite: 30 min 54 s.
+
+### Deviations from PLAN.md (session 5c)
+
+- `pit.csv` has 2 rows. Only the 2026-10-29 expiries have passed by the last close in the price files.
+- `spx_smiles_2026-10-29.png` stays in the repository from session 5b. The stage draws the first and last day, and 2026-10-29 is neither now.
+
+### Not verified (session 5c)
+
+1. `_violation` = 0 is the exact test of every Section 5.4 bound and constraint on the first route, as on the refits (O-32 (a)). A first fit that fails it, or fails the w floor, goes to the refit route.
+2. The w floor is checked on the 200,001-point acceptance grid only. Between grid points w is not checked.
+3. PIT covers every captured expiry on or before the last close, and the last close is the earlier of the last dates of `close.parquet` and `index.parquet`.
+
+### Open questions (session 5c)
+
+- **O-38** The finite-difference bound on every accepted slice. (a) The bound is the fixture test only, and the all-slice measure is reported. (b) The bound holds on every accepted slice: either the FD step is scaled to the slice, or Section 4 rejects slices whose density cannot be resolved.
+- **O-39** The SVI parameters in `svi_fits.csv` are rounded to `%.10g`. (a) Write them at full precision, so steps 5.1 and 5.2 judge the accepted parameters. (b) Keep `%.10g`; the fit's own `min_g` is the acceptance record.
+
+### Files changed (session 5c)
+
+`CLAUDE.md`, `volsurf/svi.py`, `volsurf/density.py`, `scripts/run_all.py`, `tests/test_svi.py`, `tests/test_density.py`, `tests/test_tails.py`, `tests/fixtures/csco_2026-11-13_iv.csv`, `tests/fixtures/shop_2026-11-20_iv.csv`, `tests/fixtures/README.md`, `decisions/section_5_review.md`, `decisions/OPEN.md`, `data/raw/snapshot_manifest.csv`, `outputs/tables/iv_summary.csv`, `outputs/tables/svi_fits.csv`, `outputs/tables/surface_daily.csv`, `outputs/tables/calendar_violations.csv`, `outputs/tables/ssvi_theta.csv`, `outputs/tables/density_checks.csv`, `outputs/tables/tail_probs.csv`, `outputs/tables/pit.csv`, `outputs/figures/spx_smiles_2026-10-30.png`, `outputs/figures/spx_metrics.png`, `outputs/figures/spx_surface_last.png`, `outputs/figures/spx_density_last.png`, `review/section_5.md`, `instructions/05c_section_5_finish.status.md`
+
+### Reviewer reads (session 5c)
+
+1. `instructions/05c_section_5_finish.status.md`
+2. `decisions/OPEN.md` O-38 and O-39
+3. This section: 5c-D2 (the `density_fail` slices, the finite-difference measure, the tail table and PIT)
+4. `volsurf/svi.py` (`_Slice.first_passes`, `_Slice.constrained`, `min_w`)
+5. This section: 5c-D1 (the changed slices and accepted counts)
+
