@@ -3609,7 +3609,7 @@ tests/test_capture_health.py::test_health_rows_one_per_session
 ### Fresh-clone check (session 5c)
 
 ```
-git clone https://github.com/uty101/Volatility-Surface-and-Event-Pricing.git C:s5c   (at 78184e9)
+git clone https://github.com/uty101/Volatility-Surface-and-Event-Pricing.git C:\vs5c   (at 78184e9)
 uv venv --python 3.12
 uv pip install -r requirements-lock.txt
 uv pip install -e . --no-deps
