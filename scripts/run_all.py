@@ -1,7 +1,7 @@
 """Rebuild entry point (O-1 (a)): each step's driver is a stage, run with --stage <name>.
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
-Section 3 the clean_log and iv stages, Section 4 the surface stage.
+Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages.
 """
 
 from __future__ import annotations
@@ -19,11 +19,19 @@ import pandas as pd
 
 from volsurf.config import load_config
 from volsurf.data import RATE_TENORS, SPX, capture_health, clean_chain, load_snapshot
+from volsurf.density import (
+    CHECK_COLUMNS,
+    density_check,
+    fd_density,
+    pit_table,
+    svi_density,
+    tail_probs,
+)
 from volsurf.forwards import clean_with_forwards
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
-from volsurf.svi import ACCEPTED, svi_w
+from volsurf.svi import ACCEPTED, PARAMS, svi_w
 
 SNAPSHOTS = ROOT / "data" / "snapshots"
 PROCESSED = ROOT / "data" / "processed"
@@ -300,8 +308,148 @@ def stage_surface(cfg) -> Path:
     return paths[1]
 
 
+def _closes() -> dict[str, pd.Series]:
+    """Unadjusted closes by ISO date: close.parquet per ticker, `^SPX` from `^GSPC` in index.parquet (O-3 (a))."""
+    close = pd.read_parquet(RAW / "prices" / "close.parquet")
+    index = pd.read_parquet(RAW / "prices" / "index.parquet")
+
+    def iso(s: pd.Series) -> pd.Series:
+        return pd.Series(s.to_numpy(), index=pd.to_datetime(s.index).strftime("%Y-%m-%d")).dropna()
+
+    return {**{t: iso(close[t]) for t in close.columns}, SPX: iso(index["^GSPC"])}
+
+
+def density_slices(ivs: list[pd.DataFrame], fits: pd.DataFrame) -> pd.DataFrame:
+    """SVI_FITS rows of every day joined with each slice's F, r and quoted k range from that day's IV table."""
+    quotes = pd.concat([iv[iv["iv"].notna()] for iv in ivs], ignore_index=True)
+    quotes["k"] = np.log(quotes["strike"] / quotes["F"])
+    quotes["day"] = quotes["day"].astype(str)
+    q = quotes.groupby(["day", "ticker", "expiry"], sort=False).agg(F=("F", "first"), r=("r", "first"),
+                                                                     k_min=("k", "min"), k_max=("k", "max"))
+    return fits.merge(q.reset_index(), on=["day", "ticker", "expiry"], how="left", validate="one_to_one")
+
+
+def _nearest(acc: pd.DataFrame, days: int) -> pd.Series:
+    """The accepted slice with T nearest days / 365, ties to the shorter (O-14 (a))."""
+    return acc.loc[(acc["T"] - days / 365).abs().sort_values(kind="stable").index[0]]
+
+
+def fig_density(acc: pd.DataFrame, day: str) -> Path:
+    """spx_density_last.png (PLAN 5.2, O-14 (a)): the density q(K) of the accepted ^SPX expiries nearest 30, 90 and
+    180 days on the last day, the quoted strike range shaded."""
+    plt = _plt()
+    spx = acc[(acc["day"] == day) & (acc["ticker"] == SPX)].sort_values("T")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8))
+    for ax, d in zip(axes, (30, 90, 180), strict=True):
+        r = _nearest(spx, d)
+        p = tuple(r[PARAMS])
+        sw = np.sqrt(svi_w(0.0, *p))
+        K = r["F"] * np.exp(np.linspace(-6 * sw, 4 * sw, 1500))
+        ax.axvspan(r["F"] * np.exp(r["k_min"]), r["F"] * np.exp(r["k_max"]), color="C0", alpha=0.12,
+                   label="quoted strike range")
+        ax.plot(K, svi_density(K, r["F"], r["T"], p), color="C3", lw=1.4, label="SVI density")
+        ax.axvline(r["F"], color="0.4", lw=0.8, ls="--", label=f"F = {r['F']:.1f}")
+        ax.set_title(f"{r['expiry']} ({r['T'] * 365:.1f}d, nearest {d}d)", fontsize=10)
+        ax.set_xlabel("S_T at expiry")
+        ax.set_xlim(K[0], K[-1])
+        ax.grid(alpha=0.3)
+    axes[0].set_ylabel("risk-neutral density q(K)")
+    axes[0].legend(fontsize=8)
+    fig.suptitle(f"^SPX risk-neutral densities from SVI slices, {day}")
+    fig.tight_layout()
+    return _save(fig, FIGURES / "spx_density_last.png")
+
+
+def fd_gaps(acc: pd.DataFrame, cfg) -> pd.DataFrame:
+    """MEASURE (instruction 05 part C): analytic density against the finite-difference one (step bl_dk x F) on
+    2,001 strikes over each slice's quoted range, absolute and relative to the slice's peak density."""
+    rows = []
+    for _, r in acc.iterrows():
+        p = tuple(r[PARAMS])
+        K = r["F"] * np.exp(np.linspace(r["k_min"], r["k_max"], 2001))
+        q = svi_density(K, r["F"], r["T"], p)
+        gap = np.abs(q - fd_density(K, r["F"], r["T"], np.exp(-r["r"] * r["T"]), p, cfg.density.bl_dk * r["F"]))
+        i = int(np.argmax(gap))
+        rows.append({"day": r["day"], "ticker": r["ticker"], "expiry": r["expiry"], "T": r["T"],
+                     "max_abs_gap": gap[i], "K_at_max": K[i], "q_at_max": q[i],
+                     "max_rel_gap_to_peak": gap.max() / q.max()})
+    return pd.DataFrame(rows)
+
+
+def _density_inputs(cfg) -> tuple[list[date], pd.DataFrame]:
+    """Every day's SVI_FITS rows joined with F, r and quoted k range (`density_slices`)."""
+    days = _days()
+    ivs = [pd.read_parquet(PROCESSED / "iv" / f"{d.isoformat()}.parquet") for d in days]
+    fits = pd.read_csv(TABLES / "svi_fits.csv", dtype={"day": str, "expiry": str})
+    return days, density_slices(ivs, fits)
+
+
+def stage_density(cfg) -> Path:
+    """Step 5.1 (instructions 05, 05b and 05c): density checks with density_status for every accepted slice of
+    every day (density_checks.csv) and the analytic against finite-difference gap on every day (bound 5e-3 x peak)."""
+    _, slices = _density_inputs(cfg)
+    acc = slices[slices["status"].isin(ACCEPTED)].reset_index(drop=True)
+    checks = pd.DataFrame([density_check(tuple(r[PARAMS]), r["F"], cfg) for _, r in acc.iterrows()])
+    checks = pd.concat([acc[["day", "ticker", "expiry", "T", "F"]], checks], axis=1)[CHECK_COLUMNS]
+    TABLES.mkdir(parents=True, exist_ok=True)
+    out = TABLES / "density_checks.csv"
+    checks.to_csv(out, **CSV)
+    err = checks.assign(abs_int_err=checks["int_err"].abs(), abs_mean_rel_err=checks["mean_rel_err"].abs())
+    cols = ["min_g", "abs_int_err", "abs_mean_rel_err", "tail_mass", "min_density"]
+    print(err.groupby(["day", "ticker"], sort=False)[cols].agg(["min", "max", "median"]).to_string())
+    print(err.sort_values("abs_int_err", ascending=False).head(10).to_string())
+    print(err.sort_values("abs_mean_rel_err", ascending=False).head(10).to_string())
+    print(err.sort_values("min_g").head(10).to_string())
+    wings = acc.assign(left_wing=acc["b"] * (1 - acc["rho"]), right_wing=acc["b"] * (1 + acc["rho"]))
+    top = err.assign(left_wing=wings["left_wing"], right_wing=wings["right_wing"])
+    print("10 largest tail_mass:")
+    print(top.sort_values("tail_mass", ascending=False).head(10)[
+        ["day", "ticker", "expiry", "T", "tail_mass", "left_wing", "right_wing", "int_err", "mean_rel_err"]].to_string())
+    print(f"accepted slices {len(checks)}; largest |integral - 1| {err['abs_int_err'].max()!r}, largest "
+          f"|mean / F - 1| {err['abs_mean_rel_err'].max()!r}, largest tail_mass {err['tail_mass'].max()!r}, "
+          f"smallest g {checks['min_g'].min()!r}, smallest density {checks['min_density'].min()!r}")
+    print("density_fail slices:")
+    print(checks[checks["density_status"] != "ok"].to_string())
+    gaps = fd_gaps(acc[checks["density_status"] == "ok"], cfg)
+    print(gaps.groupby(["day", "ticker"], sort=False)[["max_abs_gap", "max_rel_gap_to_peak"]].max().to_string())
+    worst = gaps.loc[gaps["max_rel_gap_to_peak"].idxmax()]
+    print(f"largest |q - q_fd| relative to peak {worst['max_rel_gap_to_peak']!r} ({worst['day']} {worst['ticker']} "
+          f"{worst['expiry']}), bound 5e-3 (instruction 05b part C); largest absolute {gaps['max_abs_gap'].max()!r}")
+    return out
+
+
+def stage_tails(cfg) -> Path:
+    """Step 5.2 (instructions 05, 05b and 05c): tail tables for the accepted slices whose density is ok
+    (tail_probs.csv), PIT values for every captured expiry that has expired by the last close in close.parquet and
+    index.parquet (pit.csv), and spx_density_last.png; reads density_checks.csv from the density stage."""
+    days, slices = _density_inputs(cfg)
+    checks = pd.read_csv(TABLES / "density_checks.csv", dtype={"day": str, "expiry": str})
+    slices = slices.merge(checks[["day", "ticker", "expiry", "density_status"]], on=["day", "ticker", "expiry"],
+                          how="left", validate="one_to_one")
+    good = slices[slices["status"].isin(ACCEPTED) & (slices["density_status"] == "ok")].reset_index(drop=True)
+    tails = tail_probs(good, cfg.density.moves)
+    closes = _closes()
+    last_close = min(pd.read_parquet(RAW / "prices" / f).index.max() for f in ("close.parquet", "index.parquet"))
+    last_close = pd.Timestamp(last_close).strftime("%Y-%m-%d")
+    pits = pit_table(slices, closes, last_close)
+    TABLES.mkdir(parents=True, exist_ok=True)
+    tails.to_csv(TABLES / "tail_probs.csv", **CSV)
+    pits.to_csv(TABLES / "pit.csv", **CSV)
+    last = days[-1].isoformat()
+    spx30 = _nearest(good[(good["day"] == last) & (good["ticker"] == SPX)], 30)
+    print(f"^SPX slice nearest 30 days on {last}: {spx30['expiry']}, T = {spx30['T']!r}, F = {spx30['F']!r}")
+    print(tails[(tails["day"] == last) & (tails["ticker"] == SPX) & (tails["expiry"] == spx30["expiry"])].to_string())
+    print(f"PIT: expiries on or before the last close {last_close}")
+    print(pits.to_string())
+    print(f"tail rows {len(tails)} over {good.groupby(['day', 'ticker', 'expiry']).ngroups} slices; "
+          f"probabilities from {tails['prob'].min()!r} to {tails['prob'].max()!r}")
+    fig_density(good, last)
+    return TABLES / "tail_probs.csv"
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
-          "surface": stage_surface}
+          "surface": stage_surface, "density": stage_density,
+          "tails": stage_tails}
 
 
 def main(argv: list[str] | None = None) -> int:

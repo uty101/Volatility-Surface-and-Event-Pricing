@@ -5,7 +5,7 @@ P(S_T > K) = N(d-) - phi(d-) w'(k) / (2 sqrt(w(k))), which is -(1/D) dC/dK of th
 the exact integral of `svi_density` from K to infinity. Tail rows are flagged `extrapolated` when a level lies
 outside [K_min, K_max] of the quotes used (kickoff Correction 11). The integral checks run on the slice's sinh grid
 over [-K, K], K = `[svi] k_check`, with the closed-form mass beyond +-K added (instruction 05b B4); a slice that misses
-`int_tol` has density status `density_fail` (O-36 (a), instruction 05b part C).
+`int_tol` has density status `density_fail` and no tail table or PIT value (O-36 (a), instruction 05b part C).
 """
 
 from __future__ import annotations
@@ -16,11 +16,14 @@ from scipy.integrate import trapezoid
 from scipy.stats import norm
 
 from volsurf.pricing import black76
-from volsurf.svi import check_grid, svi_g, svi_w, svi_w1
+from volsurf.svi import ACCEPTED, check_grid, svi_g, svi_w, svi_w1
 
 TAIL_COLUMNS = ["measure", "move", "x", "prob", "extrapolated"]
 CHECK_COLUMNS = ["day", "ticker", "expiry", "T", "F", "integral", "int_err", "tail_mass", "mean", "mean_rel_err",
                  "min_g", "min_density", "density_status"]
+PIT_COLUMNS = ["ticker", "expiry", "day", "T", "F", "S_realised", "u", "status"]
+SLICE_KEYS = ["day", "ticker", "expiry", "T", "F"]
+TAIL_PROBS_COLUMNS = [*SLICE_KEYS, "K_min", "K_max", *TAIL_COLUMNS]
 
 
 def _d_minus(k, w):
@@ -117,3 +120,45 @@ def pit(params, F, S_realised: float) -> float:
     """Kickoff 5.6 probability integral transform u = P_Q(S_T <= S_realised) on the slice."""
     return float(prob_below(S_realised, F, params))
 
+
+def _params(r) -> tuple:
+    return (r.a, r.b, r.rho, r.m, r.s)
+
+
+def tail_probs(slices: pd.DataFrame, moves) -> pd.DataFrame:
+    """PLAN 5.2 (O-1 (a) helper): `tail_table` for every slice given. `slices` has columns day, ticker, expiry, T, F,
+    k_min, k_max, a, b, rho, m, s (accepted slices whose density status is ok); output TAIL_PROBS_COLUMNS."""
+    parts = []
+    for r in slices.itertuples():
+        t = tail_table(_params(r), r.F, r.T, (r.k_min, r.k_max), moves)
+        keys = {"day": r.day, "ticker": r.ticker, "expiry": r.expiry, "T": r.T, "F": r.F,
+                "K_min": r.F * np.exp(r.k_min), "K_max": r.F * np.exp(r.k_max)}
+        parts.append(t.assign(**keys)[TAIL_PROBS_COLUMNS])
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=TAIL_PROBS_COLUMNS)
+
+
+def pit_table(fits: pd.DataFrame, closes: dict[str, pd.Series], last_day: str) -> pd.DataFrame:
+    """PLAN 5.2 with O-14 (a) and instructions 05 and 05b: one row per captured (ticker, expiry) in `fits` (SVI_FITS
+    rows of every day, with F and, optionally, density_status) whose expiry is on or before `last_day`, the latest
+    capture day. u comes from the first day with an accepted slice whose density status is ok; S_realised is the
+    unadjusted close on the expiry date from `closes` (ticker -> Series indexed by ISO date). Status `ok`,
+    `no_accepted_slice`, `density_fail` (accepted slices exist but none has a valid density) or `no_close`, with
+    blank values where they cannot be computed (Convention 4.15). Columns PIT_COLUMNS."""
+    rows = []
+    expired = fits[fits["expiry"] <= last_day]
+    for (ticker, expiry), g in expired.groupby(["ticker", "expiry"], sort=True):
+        acc = g[g["status"].isin(ACCEPTED)].sort_values("day")
+        good = acc[acc["density_status"] == "ok"] if "density_status" in acc else acc
+        row = dict.fromkeys(PIT_COLUMNS, np.nan) | {"ticker": ticker, "expiry": expiry, "day": ""}
+        close = closes.get(ticker, pd.Series(dtype=float)).get(expiry, np.nan)
+        if acc.empty:
+            row["status"] = "no_accepted_slice"
+        elif good.empty:
+            row["status"] = "density_fail"
+        else:
+            r = next(good.itertuples())
+            row.update(day=r.day, T=r.T, F=r.F, S_realised=close)
+            ok = bool(np.isfinite(close))
+            row.update(u=pit(_params(r), r.F, close) if ok else np.nan, status="ok" if ok else "no_close")
+        rows.append(row)
+    return pd.DataFrame(rows, columns=PIT_COLUMNS)
