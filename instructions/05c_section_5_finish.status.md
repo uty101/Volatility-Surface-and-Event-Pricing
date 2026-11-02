@@ -52,7 +52,7 @@ Step 5.2. Then the review section, this file, the fresh-clone check and CI.
 
 ## Tests
 
-`.venv\Scripts\python -m pytest -p socket --disable-socket -q` on Windows at `68e173a` (30 min 54 s): `4523 passed`. `ruff check .`: `All checks passed!` Fresh clone and CI: added in the commit `session 5c: fresh-clone check and CI`.
+`.venv\Scripts\python -m pytest -p socket --disable-socket -q` on Windows at `68e173a` (30 min 54 s): `4523 passed`. `ruff check .`: `All checks passed!` Fresh clone at `78184e9` (Windows, `C:s5c`): `4523 passed` (34 min 37 s). CI on `78184e9` (run 41482302435, Linux): success, `4523 passed` (14 min 37 s), ruff clean.
 
 ## `git log origin/main --oneline -3` (before this commit)
 
