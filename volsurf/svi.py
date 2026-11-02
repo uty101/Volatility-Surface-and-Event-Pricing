@@ -69,7 +69,8 @@ def check_grid(params, cfg, n: int) -> np.ndarray:
 
 
 def _g_checked(k, params) -> np.ndarray:
-    """g with every non-finite value (w <= 0) set to -inf, so it counts as a failure (instruction 05b step 5b.1)."""
+    """g with every non-finite value (w = 0) set to -inf, so it counts as a failure (instruction 05b step 5b.1); w < 0
+    with g finite is caught by the w check of instruction 05c."""
     with np.errstate(divide="ignore", invalid="ignore"):
         g = svi_g(k, params)
     return np.where(np.isfinite(g), g, -np.inf)
@@ -78,6 +79,11 @@ def _g_checked(k, params) -> np.ndarray:
 def min_g(params, cfg) -> float:
     """Smallest g on the slice's acceptance grid (`check_grid` with `[density] int_points` points)."""
     return float(_g_checked(check_grid(params, cfg, cfg.density.int_points), params).min())
+
+
+def min_w(params, cfg) -> float:
+    """Smallest total variance w on the slice's acceptance grid (instruction 05c step 5c.1)."""
+    return float(svi_w(check_grid(params, cfg, cfg.density.int_points), *params).min())
 
 
 def _constraints(cfg):
@@ -146,17 +152,26 @@ class _Slice:
         return (_exit(r) in ("success", "maxiter") and _violation(r.x, self.cons, self.bounds) == 0
                 and _g_checked(pts, r.x).min() >= -G_TOL)
 
+    def first_passes(self, p) -> bool:
+        """Instruction 05c step 5c.1 acceptance for the first route: every Section 5.4 bound and constraint met
+        exactly (`_violation` = 0), w >= 1e-12 and g >= -1e-10 at every point of the acceptance grid."""
+        return (_violation(p, self.cons, self.bounds) == 0 and min_w(p, self.cfg) >= W_FLOOR
+                and min_g(p, self.cfg) >= -G_TOL)
+
     def constrained(self, starts) -> tuple[list, list]:
-        """Instruction 05b B2 refit from each start. A result that meets the constraint (`_meets`) but has min g <
-        -1e-10 on the acceptance grid gets the `[svi] cut_points` acceptance-grid points with the lowest g added to its
-        constraint and is refitted from itself, at most `[svi] cut_rounds` more times; it counts once it passes the
-        acceptance check, and never if it still fails. Returns (counting, counting with RMSE <= max_rmse_volpts) as
-        (result, rounds) pairs."""
+        """Instruction 05b B2 refit from each start, with the instruction 05c acceptance check. A result that meets
+        the constraint (`_meets`, which includes the exact Section 5.4 bounds and constraints) and has w >= 1e-12 on the
+        acceptance grid counts once g >= -1e-10 there too; if g fails, the `[svi] cut_points` acceptance-grid points
+        with the lowest g are added to its constraint and it is refitted from itself, at most `[svi] cut_rounds` more
+        times. A result with w < 1e-12 on the acceptance grid never counts (cutting planes on g cannot repair it).
+        Returns (counting, counting with RMSE <= max_rmse_volpts) as (result, rounds) pairs."""
         counting = []
         for start in starts:
             cuts, r, rounds = np.empty(0), self._refit(start, np.empty(0)), 0
             while self._meets(r, cuts):
                 acc = check_grid(r.x, self.cfg, self.cfg.density.int_points)
+                if svi_w(acc, *r.x).min() < W_FLOOR:
+                    break
                 g = _g_checked(acc, r.x)
                 if g.min() >= -G_TOL:
                     counting.append((r, rounds))
@@ -179,9 +194,10 @@ def fit_svi(k, iv, T, cfg) -> dict:
     and instruction 05 corrections 1 to 3 as changed by instruction 05b part B.
 
     Objective sum (sqrt(max(w, 1e-12) / T) - iv)^2 under the Section 5.4 constraints with b (1 + |rho|) <=
-    `wing_max`, SLSQP from each `[svi] starts` vector, lowest objective kept (route `first`). If its min g on the
-    acceptance grid (`min_g`) is below -1e-10, refit by `_Slice.constrained` from the first fit's parameters and then
-    each start (route `refit`); the best counting refit with RMSE <= `max_rmse_volpts` gives `ok_refit`. If refits
+    `wing_max`, SLSQP from each `[svi] starts` vector, lowest objective kept (route `first`). If it fails the
+    instruction 05c acceptance check (`_Slice.first_passes`: exact Section 5.4 bounds and constraints, w >= 1e-12 and
+    g >= -1e-10 on the acceptance grid), refit by `_Slice.constrained` from the first fit's parameters and then each
+    start (route `refit`); the best counting refit with RMSE <= `max_rmse_volpts` gives `ok_refit`. If refits
     count but every one is above the RMSE gate, the best of them gives `poor_fit`; if none counts, `butterfly_fail`.
     An `ok` first fit above the RMSE gate becomes `poor_fit`. Returns params (tuple, nan for too_few), rmse_vol,
     rmse_volpts, min_g, refit, exit (of the fit judged), n_quotes, status, route and cut_rounds (cutting-plane rounds
@@ -191,7 +207,7 @@ def fit_svi(k, iv, T, cfg) -> dict:
         return {"n_quotes": len(sl.k), "params": (np.nan,) * 5, "rmse_vol": np.nan, "rmse_volpts": np.nan,
                 "min_g": np.nan, "refit": False, "exit": "", "status": "too_few", "route": "", "cut_rounds": 0}
     first = min((_fit(sl.objective, start, sl.cons, sl.bounds) for start in cfg.svi.starts), key=lambda r: r.fun)
-    if min_g(first.x, cfg) >= -G_TOL:
+    if sl.first_passes(first.x):
         return sl.result(first, "ok" if sl.rmse(first.x) <= sl.max_rmse else "poor_fit", "first", False)
     counting, good = sl.constrained([first.x, *cfg.svi.starts])
     if not counting:

@@ -11,3 +11,14 @@ One line per item: the choice made and the reviewer's reason where one was given
 - **Status 5.** All noted. Runtime accepted. XLE and NFLX below 0.75 on 2026-10-29 are reported only.
 - **Status 6.** Interpretations 1, 3, 4, 5 and 6 accepted. Interpretation 2 is replaced by part B: the sinh grid moves with m and s of the parameters being judged.
 - **Status 7 (PIT data).** Rerun `scripts/pull_data.py --stage prices` and keep the refreshed files; PIT needs the 2026-10-29 closes. The row diff is printed, as in session 5.
+
+## Session 5b
+
+Decisions from instruction 05c part B. Step 5b.1 is approved; the stop was correct and the conflict is in the reviewer's spec.
+
+- **O-37.** (a). Kickoff 5.6 is restated: q ≥ 0 holds up to the butterfly tolerance. `test_nonnegative_when_butterfly_passes` asserts, on the 200,001-point sinh grid of every accepted slice, g ≥ −1e-10 and p_k ≥ −1e-10 × the slice's largest p_k. The reviewer changes the spec, so rule 5 is not engaged. Reason: the dips are rounding-level (34 refit slices between −1.0e-10 and −3.2e-10 between sinh points, smallest w on them 6.4e-4); a density of −5e-12 carries no probability.
+- **The 2 `density_fail` slices.** A fit with w ≤ 0 is not a valid smile, so Section 4 rejects it: every route, the first included, counts only with w ≥ `W_FLOOR` (1e-12) on the acceptance grid and every Section 5.4 bound and constraint met exactly (`_violation` = 0); a first fit that fails goes to the refit route (step 5c.1). The reviewer confirmed min w −6.0e-13 on CSCO 2026-11-13 and −1.3e-6 on SHOP 2026-11-20.
+- **Status 3, 4, 5 (the finite-difference bound test), 6 (prices kept) and 7 (interpretations, including cutting points that accumulate across rounds as fixed values of k).** All accepted.
+- **Status 8 (the 2026-10-30 capture).** Included as a third day if it is in the `snapshots` release when the session starts; otherwise the 2 days, said so. Not a stop either way.
+- **Status 9.** The owner may delete `C:\vs5` and `C:\vs5b`; Claude Code does not.
+- **`tail_mass` up to 2.6e-3 (MU 2027).** Accepted: those wings are fat and the closed-form tail counts that mass. The 10 largest values are printed in the review.

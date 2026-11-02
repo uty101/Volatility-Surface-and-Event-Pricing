@@ -48,14 +48,19 @@ def test_mean_equals_forward(accepted):
 
 
 def test_nonnegative_when_butterfly_passes(accepted):
-    # the density is g times a positive factor, so q >= 0 wherever g >= 0; every accepted slice passed the
-    # butterfly check, and on the integration grid g stays at or above the same -1e-10
-    min_g = [float(svi_g(k_grid(p, CFG), p).min())
-             for p in accepted[PARAMS].itertuples(index=False)]
-    print(pd.DataFrame({"ticker": accepted["ticker"], "expiry": accepted["expiry"], "min_g_int": min_g,
-                        "min_density": accepted["min_density"]}).to_string())
-    assert min(min_g) >= -1e-10
-    assert (accepted["min_density"] >= 0).all()
+    # O-37 (a), instruction 05c: q >= 0 holds up to the butterfly tolerance. On the 200,001-point sinh grid of every
+    # accepted slice, g >= -1e-10 and p_k >= -1e-10 x the slice's largest p_k
+    rows = []
+    for p in accepted[PARAMS].itertuples(index=False):
+        k = k_grid(p, CFG)
+        dens = density_k(k, p)
+        rows.append({"min_g": float(svi_g(k, p).min()), "min_p_k": float(dens.min()), "max_p_k": float(dens.max())})
+    table = pd.concat([accepted[["ticker", "expiry"]], pd.DataFrame(rows)], axis=1)
+    table["min_over_max"] = table["min_p_k"] / table["max_p_k"]
+    print(table.to_string())
+    print(f"smallest g {table['min_g'].min()!r}, smallest p_k / largest p_k {table['min_over_max'].min()!r}")
+    assert (table["min_g"] >= -1e-10).all()
+    assert (table["min_p_k"] >= -1e-10 * table["max_p_k"]).all()
     k = k_grid(VOGT, CFG)
     assert density_k(k, VOGT).min() < 0  # a slice that fails the butterfly check has a negative density
     assert density_k(k_grid(TRUE, CFG), TRUE).min() >= 0

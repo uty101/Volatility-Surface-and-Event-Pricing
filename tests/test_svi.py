@@ -12,6 +12,7 @@ from volsurf.svi import (
     calendar_violations,
     check_grid,
     fit_svi,
+    min_w,
     neighbour_starts,
     svi_g,
     svi_w,
@@ -165,3 +166,18 @@ def test_calendar_only_inside_quoted_overlap():
     unbounded = calendar_violations([{k: v for k, v in s.items() if not k.startswith("k_")} for s in (near, cross)],
                                     grid).iloc[0]
     assert unbounded["violated"] and unbounded["n_grid"] == len(grid)
+
+
+def test_negative_w_slices_never_accepted():
+    # instruction 05c step 5c.1: CSCO 2026-11-13 and SHOP 2026-11-20 on 2026-10-29 (first-route fits with w < 0 in a
+    # wing in session 5b) come back either accepted with w >= 1e-12 on the acceptance grid or rejected
+    for name in ("csco_2026-11-13_iv.csv", "shop_2026-11-20_iv.csv"):
+        q = pd.read_csv(ROOT / "tests" / "fixtures" / name)
+        fit = fit_svi(np.log(q["strike"] / q["F"]), q["iv"], float(q["T"].iloc[0]), CFG)
+        print(name, {k: fit[k] for k in ("status", "route", "exit", "rmse_volpts", "min_g", "cut_rounds", "params")})
+        if fit["status"] in ACCEPTED:
+            w = min_w(fit["params"], CFG)
+            print(f"  min w on the acceptance grid {w!r}")
+            assert w >= 1e-12 and fit["min_g"] >= -1e-10
+        else:
+            assert fit["status"] in ("poor_fit", "butterfly_fail")
