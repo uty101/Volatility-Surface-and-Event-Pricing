@@ -2,7 +2,7 @@
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
-the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp stage.
+the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp and strategies stages.
 """
 
 from __future__ import annotations
@@ -50,7 +50,19 @@ from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
-from volsurf.vrp import vrp_monthly
+from volsurf.vrp import (
+    STATS_COLUMNS,
+    append_spec,
+    deflated_sharpe,
+    drawdown,
+    live_straddles,
+    monthly_returns,
+    strategy_returns,
+    strategy_stats,
+    tbill_returns,
+    timed_positions,
+    vrp_monthly,
+)
 
 SNAPSHOTS = ROOT / "data" / "snapshots"
 PROCESSED = ROOT / "data" / "processed"
@@ -721,6 +733,16 @@ def _vix() -> pd.Series:
     return pd.Series(vix["CLOSE"].to_numpy(), index=pd.to_datetime(vix["DATE"], format="%m/%d/%Y"))
 
 
+def _cboe(name: str) -> pd.Series:
+    d = pd.read_csv(RAW / "cboe" / f"{name}.csv")
+    return pd.Series(d["close"].to_numpy(), index=pd.to_datetime(d["date"]))
+
+
+def _dtb3() -> pd.Series:
+    d = pd.read_csv(RAW / "fred" / "DTB3.csv")
+    return pd.Series(pd.to_numeric(d["DTB3"], errors="coerce").to_numpy(), index=pd.to_datetime(d["observation_date"]))
+
+
 def stage_vrp(cfg) -> Path:
     """PLAN 8.1 with instruction 08: vrp_monthly.csv (VRP_MONTHLY) at the completed month ends of `^GSPC` from
     `[vrp] start`."""
@@ -743,10 +765,152 @@ def stage_vrp(cfg) -> Path:
     return out
 
 
+def fig_vrp(vm: pd.DataFrame) -> Path:
+    """vrp_vix2_vs_rv.png (PLAN 8.2): VIX^2 at each month end against the S&P 500 variance over the next 21
+    sessions, with the GARCH forecast, annualised variance."""
+    plt = _plt()
+    t = pd.to_datetime(vm["month_end"])
+    fig, ax = plt.subplots(figsize=(11, 5))
+    ax.plot(t, vm["iv"], color="C0", lw=0.9, label="implied: (VIX / 100)^2 at the month end")
+    ax.plot(t, vm["rv_fwd_21"], color="C3", lw=0.9, label="realised: S&P 500 variance over the next 21 sessions")
+    ax.plot(t, vm["garch_fc"], color="0.3", lw=0.8, ls="--", label="GARCH(1,1) forecast, next 21 sessions")
+    both = vm.dropna(subset=["iv", "rv_fwd_21"])
+    ax.set_yscale("log")
+    ax.set_ylabel("annualised variance (log scale)")
+    ax.set_title(f"VIX squared against forward realised variance, {vm['month_end'].iloc[0]} to "
+                 f"{vm['month_end'].iloc[-1]}: mean IV - RV {both['vrp'].mean():.4f} over {len(both)} months, IV "
+                 f"above RV in {(both['vrp'] > 0).mean() * 100:.0f}% of them", fontsize=10)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3, which="both")
+    fig.tight_layout()
+    return _save(fig, FIGURES / "vrp_vix2_vs_rv.png")
+
+
+LABELS = {"put": "PUT", "bxm": "BXM", "sp500tr": "S&P 500 TR", "timed_put": "timed PUT", "bxm_long": "BXM"}
+
+
+def fig_cumulative(strat: pd.DataFrame, bxm_long: pd.DataFrame) -> Path:
+    """vrp_cumulative.png (PLAN 8.2, O-28 (a)): cumulative excess return over T-bills, prod(1 + r - tbill), of the
+    4 strategies on the common window, log scale; BXM from `[vrp] bxm_start` dashed, a separate window."""
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    for i, c in enumerate(["put", "bxm", "sp500tr", "timed_put"]):
+        w = (1 + strat[c] - strat["tbill"]).cumprod()
+        ax.plot(pd.to_datetime(strat["month_end"]), w, color=f"C{i}", lw=1.1, label=f"{LABELS[c]}")
+    w = (1 + bxm_long["bxm"] - bxm_long["tbill"]).cumprod()
+    ax.plot(pd.to_datetime(bxm_long["month_end"]), w, color="C1", lw=0.9, ls="--",
+            label=f"BXM alone from {bxm_long['month_end'].iloc[0]} (separate window)")
+    ax.set_yscale("log")
+    ax.set_ylabel("growth of 1 in excess of T-bills (log scale)")
+    ax.set_title(f"Cumulative excess return, common window {strat['month_end'].iloc[0]} to "
+                 f"{strat['month_end'].iloc[-1]} ({len(strat)} months)", fontsize=10)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3, which="both")
+    fig.tight_layout()
+    return _save(fig, FIGURES / "vrp_cumulative.png")
+
+
+def fig_drawdowns(strat: pd.DataFrame) -> Path:
+    """vrp_drawdowns.png (PLAN 8.2): drawdown of each strategy's wealth from its running peak (`drawdown`)."""
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+    for i, c in enumerate(["put", "bxm", "sp500tr", "timed_put"]):
+        dd = drawdown(strat[c])
+        ax.plot(pd.to_datetime(strat["month_end"]), dd * 100, color=f"C{i}", lw=1.0,
+                label=f"{LABELS[c]} (worst {dd.min() * 100:.1f}%)")
+    ax.set_ylabel("drawdown from peak (%)")
+    ax.set_title(f"Drawdowns, {strat['month_end'].iloc[0]} to {strat['month_end'].iloc[-1]}", fontsize=10)
+    ax.legend(fontsize=8, loc="lower center")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    return _save(fig, FIGURES / "vrp_drawdowns.png")
+
+
+MAIN_SPEC = {  # kickoff 5.9 and instruction 08: the main specification, row 1 of spec_log.csv
+    "spec_id": "timed_put_main",
+    "description": "timed PUT: hold Cboe PUT in month m+1 if (VIX/100)^2 minus the GARCH(1,1) 21-session forecast at "
+                   "month end m is above 0, else T-bills; switch cost on every change, the first included",
+}
+
+
+def spec_params(cfg) -> dict:
+    v = cfg.vrp
+    return {"signal": "iv_minus_garch", "threshold": 0.0, "horizon": v.horizon, "garch_min_obs": v.garch_min_obs,
+            "switch_cost_bp": v.switch_cost_bp, "strategy_start": v.strategy_start,
+            "tbill": "DTB3 on the last session of month m / 1200"}
+
+
+def straddle_inputs() -> tuple[list[str], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """^SPX inputs of the live straddles: the SURFACE_DAILY days, each day's quoted strikes with T, S, F, r from the
+    IV table, SURFACE_DAILY rows, and the SSVI theta table with each expiry's T from svi_fits.csv."""
+    surface = pd.read_csv(TABLES / "surface_daily.csv", dtype={"day": str})
+    surface = surface[surface["ticker"] == SPX]
+    days = sorted(surface["day"])
+    quotes = []
+    for d in days:
+        iv = pd.read_parquet(PROCESSED / "iv" / f"{d}.parquet")
+        iv = iv[(iv["ticker"] == SPX) & iv["iv"].notna()]
+        quotes.append(iv.assign(day=d)[["day", "expiry", "strike", "T", "S", "F", "r"]])
+    quotes = pd.concat(quotes, ignore_index=True).drop_duplicates(["day", "expiry", "strike"])
+    quotes["expiry"] = quotes["expiry"].astype(str)
+    theta = pd.read_csv(TABLES / "ssvi_theta.csv", dtype={"day": str, "expiry": str})
+    theta = theta[theta["ticker"] == SPX].merge(read_fits()[["day", "ticker", "expiry", "T"]],
+                                                on=["day", "ticker", "expiry"], how="left", validate="one_to_one")
+    return days, quotes, surface, theta
+
+
+def stage_strategies(cfg) -> Path:
+    """PLAN 8.2 with instruction 08: strategies.csv (STRATEGIES) on the common window from `[vrp] strategy_start`,
+    strategy_stats.csv (the 4 strategies, then `bxm_long` from `[vrp] bxm_start`, O-28 (a)), spec_log.csv with the
+    deflated Sharpe of the timed PUT, live_straddles.csv, and the 3 Section 8 figures; reads vrp_monthly.csv."""
+    v = cfg.vrp
+    vm = pd.read_csv(TABLES / "vrp_monthly.csv", dtype={"month_end": str})
+    sig = pd.Series(vm["signal"].to_numpy(), index=pd.to_datetime(vm["month_end"]))
+    index, put, bxm, dtb3 = pd.read_parquet(RAW / "prices" / "index.parquet"), _cboe("PUT"), _cboe("BXM"), _dtb3()
+    strat = strategy_returns(put, bxm, index["^SP500TR"], dtb3, sig[sig.index >= v.strategy_start],
+                             v.switch_cost_bp)
+    ends = sig.index[sig.index >= v.bxm_start]
+    bxm_long = pd.DataFrame({"month_end": ends[1:].strftime("%Y-%m-%d"), "bxm": monthly_returns(bxm, ends).to_numpy(),
+                             "tbill": tbill_returns(dtb3, ends).to_numpy()})
+    stats = [strategy_stats(c, strat[c], strat["tbill"], strat["month_end"])
+             for c in ["put", "bxm", "sp500tr", "timed_put"]]
+    stats.append(strategy_stats("bxm_long", bxm_long["bxm"], bxm_long["tbill"], bxm_long["month_end"]))
+    timed = stats[3]
+    log = append_spec(TABLES / "spec_log.csv", MAIN_SPEC["spec_id"], MAIN_SPEC["description"], spec_params(cfg),
+                      timed["sharpe"], timed["n_months"])
+    trials = log["sharpe"].astype(float) / np.sqrt(12)  # O-17 (a): monthly Sharpe ratios
+    dsr = deflated_sharpe(sr=timed["sharpe"] / np.sqrt(12), n_obs=timed["n_months"], skew=timed["skew"],
+                          kurt_pearson=timed["excess_kurtosis"] + 3, sr_trials=trials)
+    for s in stats:
+        s.update(n_trials=np.nan, deflated_sharpe=np.nan, dsr_status="")
+    timed.update(n_trials=len(log), deflated_sharpe=dsr, dsr_status="ok" if len(log) >= 2 else "too_few_trials")
+    stats = pd.DataFrame(stats)[STATS_COLUMNS]
+    hold = timed_positions(sig[sig.index >= v.strategy_start])
+    straddles = live_straddles(*straddle_inputs(), v.straddle_target_days)
+    TABLES.mkdir(parents=True, exist_ok=True)
+    strat.to_csv(TABLES / "strategies.csv", **CSV)
+    stats.to_csv(TABLES / "strategy_stats.csv", **CSV)
+    straddles.to_csv(TABLES / "live_straddles.csv", **CSV)
+    print(strat.head(3).to_string())
+    print(strat.tail(3).to_string())
+    print(f"timed PUT: PUT in {int(hold.sum())} of {len(hold)} months, {int(hold.ne(hold.shift(1)).sum())} changes "
+          f"(the first position counts)")
+    print(stats.to_string())
+    print(log.to_string())
+    for c in ["put", "bxm", "sp500tr", "timed_put"]:
+        print(f"10 worst months, {c}:")
+        print(strat.sort_values(c, kind="stable").head(10)[["month_end", c, "tbill"]].to_string())
+    print(straddles.to_string())
+    fig_vrp(vm)
+    fig_cumulative(strat, bxm_long)
+    fig_drawdowns(strat)
+    return TABLES / "strategy_stats.csv"
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
-          "vrp": stage_vrp}
+          "vrp": stage_vrp, "strategies": stage_strategies}
 
 
 def main(argv: list[str] | None = None) -> int:

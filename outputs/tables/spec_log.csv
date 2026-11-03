@@ -1,0 +1,2 @@
+run_utc,spec_id,description,params_json,sharpe,n_months
+2026-11-03T19:23:55Z,timed_put_main,"timed PUT: hold Cboe PUT in month m+1 if (VIX/100)^2 minus the GARCH(1,1) 21-session forecast at month end m is above 0, else T-bills; switch cost on every change, the first included","{""garch_min_obs"": 1000, ""horizon"": 21, ""signal"": ""iv_minus_garch"", ""strategy_start"": ""2007-01-31"", ""switch_cost_bp"": 10, ""tbill"": ""DTB3 on the last session of month m / 1200"", ""threshold"": 0.0}",0.8025587878,237
