@@ -1,0 +1,2 @@
+scope,n,mean_log_ratio,median_log_ratio,mean_lo,mean_hi,share_above,share_lo,share_hi,status
+all,4,-0.2033790742,-0.2100833018,,,0.25,,,below_min_n
