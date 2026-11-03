@@ -27,7 +27,7 @@
       }
     },
     "prices": {
-      "pulled_utc": "2026-10-30T16:15:06.753161+00:00",
+      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
       "versions": {
         "python": "3.12.13",
         "yfinance": "1.7.0",
@@ -38,7 +38,7 @@
         "requests": "2.34.2",
         "curl_cffi": "0.17.0"
       },
-      "last_session": "2026-10-29"
+      "last_session": "2026-11-02"
     },
     "ssga": {
       "pulled_utc": "2026-10-28T12:44:41.430717+00:00",
@@ -165,17 +165,17 @@
     },
     "prices/close.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-30, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-10-30T16:15:06.753161+00:00",
-      "rows": 9295,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "rows": 9297,
       "first_date": "1989-12-01",
-      "last_date": "2026-10-29",
-      "sha256": "6c9d3f87de8c2b76850c337662c5e5082f3d40b950011a0226ca6de6b0bfdb6b"
+      "last_date": "2026-11-02",
+      "sha256": "bf832b3f86e929612a15a19df59a50c2e6e4ee7345ef083fffa7224dca7004f8"
     },
     "prices/dividends.csv": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-30, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-10-30T16:15:06.753161+00:00",
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
       "rows": 2479,
       "first_date": "1989-12-05",
       "last_date": "2026-10-14",
@@ -183,21 +183,21 @@
     },
     "prices/index.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-30, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-10-30T16:15:06.753161+00:00",
-      "rows": 9295,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "rows": 9297,
       "first_date": "1989-12-01",
-      "last_date": "2026-10-29",
-      "sha256": "b47e70b55210f02ec5ae8fdd578137d00055e9bc4425fe4080509426fd7efda1"
+      "last_date": "2026-11-02",
+      "sha256": "186ccbc5879e0025949fd3e1995b65d97ddf544bc44b975782d9282af3ceae43"
     },
     "prices/sectors.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-10-30, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-10-30T16:15:06.753161+00:00",
-      "rows": 7006,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "rows": 7008,
       "first_date": "1998-12-22",
-      "last_date": "2026-10-29",
-      "sha256": "403066ff073deb41c96ab444312a6718be4d3a9224605e4f0e7bf231c97f7808"
+      "last_date": "2026-11-02",
+      "sha256": "a533efbfb6bcc2ed97ade320ed208b7f05b3b658be6bfe7b93662814a9a9325f"
     },
     "ssga/xlk_holdings_2026-10-28.csv": {
       "stage": "ssga",

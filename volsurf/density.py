@@ -5,7 +5,9 @@ P(S_T > K) = N(d-) - phi(d-) w'(k) / (2 sqrt(w(k))), which is -(1/D) dC/dK of th
 the exact integral of `svi_density` from K to infinity. Tail rows are flagged `extrapolated` when a level lies
 outside [K_min, K_max] of the quotes used (kickoff Correction 11). The integral checks run on the slice's sinh grid
 over [-K, K], K = `[svi] k_check`, with the closed-form mass beyond +-K added (instruction 05b B4); a slice that misses
-`int_tol` has density status `density_fail` and no tail table or PIT value (O-36 (a), instruction 05b part C).
+`int_tol` has density status `density_fail` and no tail table or PIT value (O-36 (a), instruction 05b part C). So do
+slices with s at the `s_min` floor (`kink`) and slices whose analytic density misses the finite-difference one by more
+than 5e-3 x peak at the step F min(`bl_dk`, s / 10) (`fd_gap`) (O-38 (b), instruction 06).
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from volsurf.svi import ACCEPTED, check_grid, svi_g, svi_w, svi_w1
 
 TAIL_COLUMNS = ["measure", "move", "x", "prob", "extrapolated"]
 CHECK_COLUMNS = ["day", "ticker", "expiry", "T", "F", "integral", "int_err", "tail_mass", "mean", "mean_rel_err",
-                 "min_g", "min_density", "density_status"]
+                 "min_g", "min_density", "fd_rel_gap", "density_status"]
 PIT_COLUMNS = ["ticker", "expiry", "day", "T", "F", "S_realised", "u", "status"]
 SLICE_KEYS = ["day", "ticker", "expiry", "T", "F"]
 TAIL_PROBS_COLUMNS = [*SLICE_KEYS, "K_min", "K_max", *TAIL_COLUMNS]
@@ -76,11 +78,18 @@ def k_grid(params, cfg) -> np.ndarray:
     return check_grid(params, cfg, cfg.density.int_points)
 
 
+def is_kink(params, cfg) -> bool:
+    """O-38 (b) part 1, instruction 06: s at the `[svi] s_min` floor, s <= s_min x (1 + 1e-6), is a corner in the
+    fitted smile, and its density gets status `kink`."""
+    return float(params[4]) <= cfg.svi.s_min * (1 + 1e-6)  # instruction 06 part B, O-38: s_min x (1 + 1e-6)
+
+
 def density_check(params, F, cfg) -> dict:
     """Instruction 05b B4: trapezoid integrals of the density on the sinh grid over [F e^(-K), F e^(K)], as p_k dk
     and F e^k p_k dk; the integral adds the closed-form mass beyond +-K, tail_mass = P(S_T < F e^(-K)) +
     P(S_T > F e^(K)). Errors against 1 and F (relative), the smallest g and density on the grid, and
-    density_status `ok` or `density_fail` (either error above `int_tol`; O-36 (a))."""
+    density_status `kink` (`is_kink`, O-38 (b)), else `density_fail` (either error above `int_tol`; O-36 (a)), else
+    `ok`. The `fd_gap` status is set afterwards from `fd_gap` on the quoted range."""
     k = k_grid(params, cfg)
     p = density_k(k, params)
     tail = float(prob_below(F * np.exp(k[0]), F, params) + prob_above(F * np.exp(k[-1]), F, params))
@@ -88,7 +97,27 @@ def density_check(params, F, cfg) -> dict:
     out = {"integral": integral, "int_err": integral - 1, "tail_mass": tail, "mean": mean,
            "mean_rel_err": mean / F - 1, "min_g": float(svi_g(k, params).min()), "min_density": float(p.min())}
     ok = abs(out["int_err"]) <= cfg.density.int_tol and abs(out["mean_rel_err"]) <= cfg.density.int_tol
-    return out | {"density_status": "ok" if ok else "density_fail"}
+    status = "kink" if is_kink(params, cfg) else "ok" if ok else "density_fail"
+    return out | {"density_status": status}
+
+
+FD_GAP_MAX = 5e-3  # instruction 05b part C: largest |q - q_fd| <= 5e-3 x the slice's peak density on the quoted range
+
+
+def fd_step(params, F, cfg) -> float:
+    """O-38 (b) part 2, instruction 06: dk = F x min(`bl_dk`, s / 10)."""
+    return F * min(cfg.density.bl_dk, float(params[4]) / 10)  # instruction 06 part B, O-38: s / 10
+
+
+def fd_gap(params, F, T, D, k_range, cfg) -> dict:
+    """Analytic density against `fd_density` with step `fd_step` on 2,001 strikes over the quoted range F e^k_range:
+    the largest absolute gap, where it is, and the largest gap relative to the slice's peak density there."""
+    K = F * np.exp(np.linspace(k_range[0], k_range[1], 2001))
+    q = svi_density(K, F, T, params)
+    gap = np.abs(q - fd_density(K, F, T, D, params, fd_step(params, F, cfg)))
+    i = int(np.argmax(gap))
+    return {"max_abs_gap": float(gap[i]), "K_at_max": float(K[i]), "q_at_max": float(q[i]),
+            "max_rel_gap_to_peak": float(gap.max() / q.max())}
 
 
 def tail_table(params, F, T, k_range, moves) -> pd.DataFrame:
@@ -142,8 +171,9 @@ def pit_table(fits: pd.DataFrame, closes: dict[str, pd.Series], last_day: str) -
     rows of every day, with F and, optionally, density_status) whose expiry is on or before `last_day`, the latest
     capture day. u comes from the first day with an accepted slice whose density status is ok; S_realised is the
     unadjusted close on the expiry date from `closes` (ticker -> Series indexed by ISO date). Status `ok`,
-    `no_accepted_slice`, `density_fail` (accepted slices exist but none has a valid density) or `no_close`, with
-    blank values where they cannot be computed (Convention 4.15). Columns PIT_COLUMNS."""
+    `no_accepted_slice`, the first accepted slice's density status (`density_fail`, `kink` or `fd_gap`) when accepted
+    slices exist but none has an ok density, or `no_close`, with blank values where they cannot be computed
+    (Convention 4.15). Columns PIT_COLUMNS."""
     rows = []
     expired = fits[fits["expiry"] <= last_day]
     for (ticker, expiry), g in expired.groupby(["ticker", "expiry"], sort=True):
@@ -154,7 +184,7 @@ def pit_table(fits: pd.DataFrame, closes: dict[str, pd.Series], last_day: str) -
         if acc.empty:
             row["status"] = "no_accepted_slice"
         elif good.empty:
-            row["status"] = "density_fail"
+            row["status"] = acc["density_status"].iloc[0]
         else:
             r = next(good.itertuples())
             row.update(day=r.day, T=r.T, F=r.F, S_realised=close)

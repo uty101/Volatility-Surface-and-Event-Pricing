@@ -22,3 +22,14 @@ Decisions from instruction 05c part B. Step 5b.1 is approved; the stop was corre
 - **Status 8 (the 2026-10-30 capture).** Included as a third day if it is in the `snapshots` release when the session starts; otherwise the 2 days, said so. Not a stop either way.
 - **Status 9.** The owner may delete `C:\vs5` and `C:\vs5b`; Claude Code does not.
 - **`tail_mass` up to 2.6e-3 (MU 2027).** Accepted: those wings are fat and the closed-form tail counts that mass. The 10 largest values are printed in the review.
+
+## Session 5c
+
+Decisions from instruction 06 part B. Section 5 is complete and approved; the reviewer recomputed both PIT values from the committed `svi_fits.csv` by a central difference of the Black put price and matched `pit.csv` to 6 decimals.
+
+- **O-38.** (b), in 2 parts. 1. Kinked slices: an accepted slice with s ≤ `s_min` × (1 + 1e-6) keeps its Section 4 status (its vols fit within the RMSE gate), but its density gets status `kink` and it is left out of `tail_probs.csv`, `pit.csv` and the density figure. The reviewer measured the 99 accepted slices with s at the floor: each puts a median 4.6 times, and up to 22 times, the probability a flat smile at w(m) would put in m ± 20s, a corner in the fit and not information in the quotes. 2. The finite-difference step becomes dk = F × min(`bl_dk`, s / 10), and the 5e-3 × peak bound runs on every non-`kink` accepted slice on every day; a slice that still misses it gets density status `fd_gap`, is left out like `kink` and is listed in the review. Not a stop.
+- **O-39.** (a). The SVI parameters in `svi_fits.csv` are written at full precision (`%.17g`), and steps 5.1 and 5.2 read them as fitted.
+- **Status 3 (daily shares below 0.75).** Reported only, as before.
+- **Status 4 (runtime).** Accepted.
+- **Status 5.** `spx_smiles_{day}.png` is drawn for every day, so no stale figure stays behind.
+- **Status 6.** The owner may delete `C:\vs4`, `C:\vs4b`, `C:\vs5`, `C:\vs5b` and `C:\vs5c`. Claude Code does not.

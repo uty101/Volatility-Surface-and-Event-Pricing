@@ -21,8 +21,10 @@ from volsurf.config import load_config
 from volsurf.data import RATE_TENORS, SPX, capture_health, clean_chain, load_snapshot
 from volsurf.density import (
     CHECK_COLUMNS,
+    FD_GAP_MAX,
     density_check,
-    fd_density,
+    fd_gap,
+    fd_step,
     pit_table,
     svi_density,
     tail_probs,
@@ -42,6 +44,7 @@ FIGURES = ROOT / "outputs" / "figures"
 CAPTURE_START = date(2026, 10, 28)  # kickoff Section 3.3: capture window starts 2026-10-28
 FIXTURE_DAY = date(2026, 10, 28)  # instruction 01d part B: the fixture day
 CSV = {"index": False, "float_format": "%.10g", "lineterminator": "\n", "encoding": "utf-8"}
+FULL = "%.17g"  # O-39 (a), instruction 06: SVI parameters in svi_fits.csv at full precision
 
 
 def stage_capture_health(cfg) -> Path:
@@ -152,7 +155,10 @@ def write_surface_tables(tables: dict[str, pd.DataFrame], out_dir: Path) -> list
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for name, file in SURFACE_FILES.items():
-        tables[name].to_csv(out_dir / file, **CSV)
+        table = tables[name]
+        if name == "svi_fits":
+            table = table.assign(**{c: table[c].map(lambda v: "" if pd.isna(v) else FULL % v) for c in PARAMS})
+        table.to_csv(out_dir / file, **CSV)
         paths.append(out_dir / file)
     return paths
 
@@ -300,8 +306,8 @@ def stage_surface(cfg) -> Path:
     cal = tables["calendar"]
     print(cal.groupby(["day", "ticker"], sort=False)["violated"].agg(["size", "sum"]).to_string())
     print(cal.groupby("day")["violated"].agg(["size", "sum"]).to_string())
-    for day in dict.fromkeys([days[0].isoformat(), days[-1].isoformat()]):
-        fig_smiles(fits, day)
+    for day in days:  # instruction 06 part B status 5: every day, so no stale figure stays behind
+        fig_smiles(fits, day.isoformat())
     fig_smile_fits(fits, ivs[0], FIXTURE_DAY.isoformat())
     fig_surface(tables, days[-1].isoformat())
     fig_metrics(surface)
@@ -361,35 +367,38 @@ def fig_density(acc: pd.DataFrame, day: str) -> Path:
 
 
 def fd_gaps(acc: pd.DataFrame, cfg) -> pd.DataFrame:
-    """MEASURE (instruction 05 part C): analytic density against the finite-difference one (step bl_dk x F) on
-    2,001 strikes over each slice's quoted range, absolute and relative to the slice's peak density."""
+    """O-38 (b), instruction 06: `fd_gap` (step F min(bl_dk, s / 10)) on 2,001 strikes over each slice's quoted
+    range, absolute and relative to the slice's peak density."""
     rows = []
     for _, r in acc.iterrows():
-        p = tuple(r[PARAMS])
-        K = r["F"] * np.exp(np.linspace(r["k_min"], r["k_max"], 2001))
-        q = svi_density(K, r["F"], r["T"], p)
-        gap = np.abs(q - fd_density(K, r["F"], r["T"], np.exp(-r["r"] * r["T"]), p, cfg.density.bl_dk * r["F"]))
-        i = int(np.argmax(gap))
-        rows.append({"day": r["day"], "ticker": r["ticker"], "expiry": r["expiry"], "T": r["T"],
-                     "max_abs_gap": gap[i], "K_at_max": K[i], "q_at_max": q[i],
-                     "max_rel_gap_to_peak": gap.max() / q.max()})
-    return pd.DataFrame(rows)
+        gap = fd_gap(tuple(r[PARAMS]), r["F"], r["T"], np.exp(-r["r"] * r["T"]), (r["k_min"], r["k_max"]), cfg)
+        rows.append({"day": r["day"], "ticker": r["ticker"], "expiry": r["expiry"], "T": r["T"], "s": r["s"],
+                     "dk": fd_step(tuple(r[PARAMS]), r["F"], cfg), **gap})
+    return pd.DataFrame(rows, index=acc.index)
+
+
+def read_fits() -> pd.DataFrame:
+    """svi_fits.csv with the SVI parameters exactly as fitted (O-39 (a)): written at %.17g, read back round-trip."""
+    return pd.read_csv(TABLES / "svi_fits.csv", dtype={"day": str, "expiry": str}, float_precision="round_trip")
 
 
 def _density_inputs(cfg) -> tuple[list[date], pd.DataFrame]:
     """Every day's SVI_FITS rows joined with F, r and quoted k range (`density_slices`)."""
     days = _days()
     ivs = [pd.read_parquet(PROCESSED / "iv" / f"{d.isoformat()}.parquet") for d in days]
-    fits = pd.read_csv(TABLES / "svi_fits.csv", dtype={"day": str, "expiry": str})
-    return days, density_slices(ivs, fits)
+    return days, density_slices(ivs, read_fits())
 
 
 def stage_density(cfg) -> Path:
-    """Step 5.1 (instructions 05, 05b and 05c): density checks with density_status for every accepted slice of
-    every day (density_checks.csv) and the analytic against finite-difference gap on every day (bound 5e-3 x peak)."""
+    """Step 5.1 (instructions 05, 05b, 05c and 06): density checks with density_status for every accepted slice of
+    every day (density_checks.csv). The analytic against finite-difference gap runs on every slice that is not
+    `kink` or `density_fail`; one above 5e-3 x peak gets status `fd_gap` (O-38 (b))."""
     _, slices = _density_inputs(cfg)
     acc = slices[slices["status"].isin(ACCEPTED)].reset_index(drop=True)
     checks = pd.DataFrame([density_check(tuple(r[PARAMS]), r["F"], cfg) for _, r in acc.iterrows()])
+    gaps = fd_gaps(acc[checks["density_status"] == "ok"], cfg)
+    checks["fd_rel_gap"] = gaps["max_rel_gap_to_peak"]
+    checks.loc[checks["fd_rel_gap"] > FD_GAP_MAX, "density_status"] = "fd_gap"
     checks = pd.concat([acc[["day", "ticker", "expiry", "T", "F"]], checks], axis=1)[CHECK_COLUMNS]
     TABLES.mkdir(parents=True, exist_ok=True)
     out = TABLES / "density_checks.csv"
@@ -408,13 +417,17 @@ def stage_density(cfg) -> Path:
     print(f"accepted slices {len(checks)}; largest |integral - 1| {err['abs_int_err'].max()!r}, largest "
           f"|mean / F - 1| {err['abs_mean_rel_err'].max()!r}, largest tail_mass {err['tail_mass'].max()!r}, "
           f"smallest g {checks['min_g'].min()!r}, smallest density {checks['min_density'].min()!r}")
+    print("density status per day:")
+    print(pd.crosstab(checks["day"], checks["density_status"]).to_string())
     print("density_fail slices:")
-    print(checks[checks["density_status"] != "ok"].to_string())
-    gaps = fd_gaps(acc[checks["density_status"] == "ok"], cfg)
+    print(checks[checks["density_status"] == "density_fail"].to_string())
+    print("fd_gap slices:")
+    print(gaps[gaps["max_rel_gap_to_peak"] > FD_GAP_MAX].to_string())
     print(gaps.groupby(["day", "ticker"], sort=False)[["max_abs_gap", "max_rel_gap_to_peak"]].max().to_string())
     worst = gaps.loc[gaps["max_rel_gap_to_peak"].idxmax()]
     print(f"largest |q - q_fd| relative to peak {worst['max_rel_gap_to_peak']!r} ({worst['day']} {worst['ticker']} "
-          f"{worst['expiry']}), bound 5e-3 (instruction 05b part C); largest absolute {gaps['max_abs_gap'].max()!r}")
+          f"{worst['expiry']}), bound {FD_GAP_MAX} (instruction 05b part C); largest absolute "
+          f"{gaps['max_abs_gap'].max()!r}")
     return out
 
 

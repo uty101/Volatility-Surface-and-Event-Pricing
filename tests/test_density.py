@@ -10,6 +10,9 @@ from volsurf.density import (
     density_check,
     density_k,
     fd_density,
+    fd_gap,
+    fd_step,
+    is_kink,
     k_grid,
     prob_above,
     prob_below,
@@ -85,20 +88,24 @@ def test_prob_above_matches_integrated_density():
 
 
 def test_analytic_vs_fd(accepted):
-    # instruction 05b part C (was MEASURE): analytic density against e^(rT) d2C/dK2 with step bl_dk x F, on 2,001
-    # strikes over each accepted fixture slice's quoted range; the largest gap is <= 5e-3 x the slice's peak density
-    # on the quoted range
+    # instruction 05b part C with O-38 (b), instruction 06: analytic density against e^(rT) d2C/dK2 with step
+    # F min(bl_dk, s / 10), on 2,001 strikes over each non-kink accepted fixture slice's quoted range; the largest gap
+    # is <= 5e-3 x the slice's peak density on the quoted range
     rows = []
-    for r in accepted.itertuples():
+    for r in accepted[accepted["density_status"] != "kink"].itertuples():
         p = tuple(getattr(r, c) for c in PARAMS)
         K = r.F * np.exp(np.linspace(r.k_min, r.k_max, 2001))
         q = svi_density(K, r.F, r.T, p)
-        q_fd = fd_density(K, r.F, r.T, np.exp(-r.r * r.T), p, CFG.density.bl_dk * r.F)
-        gap = np.abs(q - q_fd)
+        dk = r.F * min(CFG.density.bl_dk, r.s / 10)
+        assert fd_step(p, r.F, CFG) == dk
+        gap = np.abs(q - fd_density(K, r.F, r.T, np.exp(-r.r * r.T), p, dk))
         i = int(np.argmax(gap))
-        rows.append({"ticker": r.ticker, "expiry": r.expiry, "T": r.T, "max_abs_gap": gap[i], "K_at_max": K[i],
-                     "q_at_max": q[i], "max_rel_gap_to_peak": gap.max() / q.max()})
+        row = {"ticker": r.ticker, "expiry": r.expiry, "T": r.T, "s": r.s, "max_abs_gap": gap[i], "K_at_max": K[i],
+               "q_at_max": q[i], "max_rel_gap_to_peak": gap.max() / q.max()}
+        assert fd_gap(p, r.F, r.T, np.exp(-r.r * r.T), (r.k_min, r.k_max), CFG)["max_rel_gap_to_peak"] ==             row["max_rel_gap_to_peak"]
+        rows.append(row)
     table = pd.DataFrame(rows)
+    print(f"{len(table)} non-kink accepted fixture slices of {len(accepted)}")
     print(table.to_string())
     worst = table.loc[table["max_abs_gap"].idxmax()]
     print(f"largest |q - q_fd| {worst['max_abs_gap']!r} ({worst['ticker']} {worst['expiry']}); "
@@ -134,3 +141,14 @@ def test_density_check_tail_mass_and_status():
     leak = density_check(flat_wing, F, CFG)
     print(leak)
     assert leak["density_status"] == "density_fail" and abs(leak["mean_rel_err"]) > CFG.density.int_tol
+
+
+def test_kink_status():
+    # O-38 (b), instruction 06: s <= s_min x (1 + 1e-6) is a kink, whatever the integral checks say
+    F, s_min = 100.0, CFG.svi.s_min
+    kinked = (0.02, 0.15, -0.4, 0.05, s_min * (1 + 1e-7))
+    assert is_kink(kinked, CFG) and density_check(kinked, F, CFG)["density_status"] == "kink"
+    smooth = (0.02, 0.15, -0.4, 0.05, s_min * (1 + 1e-5))
+    assert not is_kink(smooth, CFG) and density_check(smooth, F, CFG)["density_status"] == "ok"
+    assert fd_step(TRUE, F, CFG) == F * CFG.density.bl_dk  # s / 10 = 0.02 > bl_dk
+    assert fd_step(smooth, F, CFG) == F * smooth[4] / 10
