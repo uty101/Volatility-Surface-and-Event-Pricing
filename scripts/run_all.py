@@ -3,7 +3,7 @@
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
 the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp and strategies stages, Section 9
-the attribution stage, Section 10 the risk stage.
+the attribution stage, Section 10 the risk and report stages.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from volsurf.events import (
 from volsurf.forwards import clean_with_forwards
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
+from volsurf.report import build_risk_report
 from volsurf.risk import book_risk, day_surface, limit_breaches, select_book, shock_grid
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
@@ -73,6 +74,7 @@ RAW = ROOT / "data" / "raw"
 FIXTURES = ROOT / "tests" / "fixtures"
 TABLES = ROOT / "outputs" / "tables"
 FIGURES = ROOT / "outputs" / "figures"
+REPORTS = ROOT / "outputs" / "reports"
 CAPTURE_START = date(2026, 10, 28)  # kickoff Section 3.3: capture window starts 2026-10-28
 FIXTURE_DAY = date(2026, 10, 28)  # instruction 01d part B: the fixture day
 CSV = {"index": False, "float_format": "%.10g", "lineterminator": "\n", "encoding": "utf-8"}
@@ -959,11 +961,19 @@ def stage_risk(cfg) -> Path:
     return TABLES / "risk_grid.csv"
 
 
+def stage_report(cfg) -> Path:
+    """PLAN 10.2 with instruction 10: the PDF for the last captured day, from the risk stage's tables."""
+    days = _days()
+    grid, risk, breaches = (pd.read_csv(TABLES / f"{name}.csv", dtype={"day": str, "expiry": str})
+                            for name in ("risk_grid", "risk_book", "limit_breaches"))
+    return build_risk_report(days[-1], grid, risk, breaches, REPORTS / f"risk_{days[-1]}.pdf", len(days))
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
           "vrp": stage_vrp, "strategies": stage_strategies, "attribution": stage_attribution,
-          "risk": stage_risk}
+          "risk": stage_risk, "report": stage_report}
 
 
 def main(argv: list[str] | None = None) -> int:
