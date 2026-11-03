@@ -8,11 +8,16 @@ import statsmodels.api as sm
 
 from volsurf.config import load_config
 from volsurf.correlation import (
+    LIVE_COLUMNS,
+    RV_COLUMNS,
     STUDY_COLUMNS,
     avg_pairwise_corr,
     cor3m_study,
     implied_correlation,
+    live_implied_corr,
+    live_weights,
     newey_west,
+    rv_screen,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,3 +87,48 @@ def test_implied_correlation_hand_value():
     assert implied_correlation(0.6 * 0.30 + 0.4 * 0.20, sig, w) == pytest.approx(1.0, abs=1e-14)
     assert math.isnan(implied_correlation(0.22, sig.iloc[:1], w))
 
+
+def test_weights_renormalised_and_covered_weight():
+    weights = pd.Series({"A": 0.30, "B": 0.20, "C": 0.10, "D": 0.05})  # D is not captured, C has no vol
+    sig = pd.Series({"A": 0.30, "B": 0.20, "C": np.nan})
+    w, covered = live_weights(weights, sig)
+    assert covered == pytest.approx(0.50, abs=1e-15)
+    assert w.to_dict() == pytest.approx({"A": 0.6, "B": 0.4}, abs=1e-15)
+    assert implied_correlation(0.22, sig, weights) == implied_correlation(0.22, sig.iloc[:2], w)
+    surface = pd.DataFrame({"day": ["2026-10-29"] * 4 + ["2026-10-30"] * 3,
+                            "ticker": ["XLK", "A", "B", "C", "A", "B", "C"],
+                            "atm_30": [0.22, 0.30, 0.20, np.nan, 0.31, 0.21, 0.25]})
+    live = live_implied_corr(surface, weights, "2026-11-02", CFG)
+    print(live.to_string())
+    assert list(live.columns) == LIVE_COLUMNS
+    r = live.set_index("day")
+    assert r.loc["2026-10-29", "covered_weight"] == pytest.approx(0.50, abs=1e-15)
+    assert r.loc["2026-10-29", "n_names"] == 2
+    assert r.loc["2026-10-29", "implied_corr"] == pytest.approx((0.0484 - 0.0388) / 0.0288, abs=1e-14)
+    assert r.loc["2026-10-29", "status"] == "pending"  # 21 sessions after 10-29 are not in the price data
+    assert r.loc["2026-10-30", "covered_weight"] == pytest.approx(0.60, abs=1e-15)
+    assert r.loc["2026-10-30", "status"] == "no_index_vol|pending" and np.isnan(r.loc["2026-10-30", "implied_corr"])
+    assert r[["realised_index_vol", "realised_implied_corr", "realised_avg_pairwise_corr"]].isna().all(axis=None)
+
+
+def test_rv_screen_blank_below_min_days():
+    n = CFG.correlation.rv_min_days
+    days = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2026-01-02", periods=n + 2)]
+    vols = 0.20 + 0.01 * np.sin(np.arange(n + 2))
+    surface = pd.concat([pd.DataFrame({"day": d, "ticker": ["NVDA", "AAPL", "AMD", "SPY"],
+                                       "atm_30": [v, 0.25, np.nan if i == 0 else 0.40, 0.15]})
+                         for i, (d, v) in enumerate(zip(days, vols, strict=True))], ignore_index=True)
+    rv = rv_screen(surface, CFG)
+    print(rv[rv["ticker"] == "NVDA"].to_string())
+    assert list(rv.columns) == RV_COLUMNS
+    nv = rv[rv["ticker"] == "NVDA"].reset_index(drop=True)
+    assert (nv.loc[:n - 1, "status"] == "below_min_days").all() and nv.loc[:n - 1, "zscore"].isna().all()
+    assert (nv.loc[n:, "status"] == "ok").all() and nv["n_prior"].tolist() == list(range(n + 2))
+    expected = (vols[n] - vols[:n].mean()) / vols[:n].std(ddof=1)  # O-15 (a): prior days only, ddof 1
+    assert nv.loc[n, "zscore"] == pytest.approx(expected, abs=1e-12)
+    # group median from day 1: NVDA, AAPL, AMD are xlk_holdings; AMD has no vol on day 1
+    first = rv[rv["day"] == days[0]].set_index("ticker")
+    assert first.loc["NVDA", "group_median"] == pytest.approx((vols[0] + 0.25) / 2, abs=1e-15)
+    assert first.loc["AMD", "status"] == "no_vol" and np.isnan(first.loc["AMD", "vol_minus_group_median"])
+    assert first.loc["SPY", "vol_minus_group_median"] == 0.0 and first.loc["SPY", "group"] == "etfs"
+    assert rv.loc[rv["ticker"] == "AMD", "n_prior"].tolist()[-1] == n  # the blank day is not a prior day

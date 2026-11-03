@@ -2,7 +2,7 @@
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
-the events stage, Section 7 the cor3m stage.
+the events stage, Section 7 the cor3m and live_corr stages.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from volsurf.config import load_config
-from volsurf.correlation import STUDY_COLUMNS, cor3m_study
+from volsurf.correlation import STUDY_COLUMNS, cor3m_study, live_implied_corr, rv_screen
 from volsurf.data import RATE_TENORS, SPX, capture_health, clean_chain, load_snapshot
 from volsurf.density import (
     CHECK_COLUMNS,
@@ -689,10 +689,32 @@ def stage_cor3m(cfg) -> Path:
     return out
 
 
+def stage_live_corr(cfg) -> Path:
+    """PLAN 7.2 with instruction 07: implied_corr_live.csv (XLK implied correlation per SURFACE_DAILY day, weights from
+    data/raw/ssga/xlk_holdings_2026-10-28.csv) and rv_screen.csv."""
+    surface = pd.read_csv(TABLES / "surface_daily.csv", dtype={"day": str})
+    holdings = pd.read_csv(RAW / "ssga" / "xlk_holdings_2026-10-28.csv")  # instruction 07 step 7.2: not refreshed
+    weights = holdings.dropna(subset=["ticker"]).set_index("ticker")["weight"]
+    last_price = pd.Timestamp(pd.read_parquet(RAW / "prices" / "close.parquet").index.max()).strftime("%Y-%m-%d")
+    live = live_implied_corr(surface, weights, last_price, cfg)
+    rv = rv_screen(surface, cfg)
+    TABLES.mkdir(parents=True, exist_ok=True)
+    live.to_csv(TABLES / "implied_corr_live.csv", **CSV)
+    rv.to_csv(TABLES / "rv_screen.csv", **CSV)
+    print(f"last close in close.parquet: {last_price}")
+    print(live.to_string())
+    last = rv[rv["day"] == rv["day"].max()].sort_values("vol_minus_group_median", ascending=False, kind="stable")
+    print(f"RV screen on {rv['day'].max()}, top 5 by vol minus group median:")
+    print(last.head(5).to_string())
+    print("bottom 5:")
+    print(last.dropna(subset=["vol_minus_group_median"]).tail(5).to_string())
+    print(rv["status"].value_counts().to_string())
+    return TABLES / "implied_corr_live.csv"
+
 
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
-          "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m}
+          "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr}
 
 
 def main(argv: list[str] | None = None) -> int:

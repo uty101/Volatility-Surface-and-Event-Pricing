@@ -4,6 +4,8 @@ Long history: Cboe COR3M against the forward realised average pairwise correlati
 sector-level proxy. Sector ETFs are already diversified baskets and correlate with each other more than the 50 largest
 S&P 500 stocks behind COR3M do, so implied sits below realised; that gap is the proxy, not a correlation risk premium.
 The slope and R² are the usable result: how much of the next quarter's correlation the index options anticipate.
+
+Live: XLK implied correlation from 30-day constant-maturity ATM vols (SURFACE_DAILY atm_30) and RV screens.
 """
 
 from __future__ import annotations
@@ -12,10 +14,18 @@ import exchange_calendars as xcals
 import numpy as np
 import pandas as pd
 
+from volsurf.events import group_of
+from volsurf.snapshots import _xnys
+
 GAP_NOTE = ("sector-level proxy: sector ETFs are diversified baskets and correlate with each other more than the single "
             "stocks behind COR3M, so implied sits below realised; the gap is the proxy, not a correlation risk premium")
 STUDY_COLUMNS = ["n", "first_t", "last_t", "horizon", "maxlags", "intercept", "intercept_nw_se", "slope",
                  "slope_nw_se", "r2", "mean_implied", "mean_realised", "mean_gap", "gap_note"]
+LIVE_COLUMNS = ["day", "index", "index_vol", "n_names", "covered_weight", "implied_corr", "realised_index_vol",
+                "realised_implied_corr", "realised_avg_pairwise_corr", "status"]
+RV_COLUMNS = ["day", "ticker", "group", "atm_30", "n_prior", "zscore", "group_median", "vol_minus_group_median",
+              "status"]
+INDEX = "XLK"  # kickoff Section 5.8: I = XLK
 
 
 def live_weights(weights: pd.Series, sig: pd.Series) -> tuple[pd.Series, float]:
@@ -103,3 +113,63 @@ def cor3m_study(cor3m: pd.Series, sectors: pd.DataFrame, horizon: int, maxlags: 
             "slope": float(fit["params"][1]), "slope_nw_se": float(fit["se"][1]), "r2": fit["r2"],
             "mean_implied": float(series["implied"].mean()), "mean_realised": float(series["realised"].mean()),
             "mean_gap": float(series["gap"].mean()), "gap_note": GAP_NOTE, "series": series}
+
+
+def window_complete(day: str, last_price: str, horizon: int) -> bool:
+    """Instruction 07 step 7.2: True when the `horizon` XNYS sessions after `day` are all on or before `last_price`."""
+    cal = _xnys()
+    t = pd.Timestamp(day)
+    end = cal.session_offset(t, horizon) if cal.is_session(t) else cal.session_offset(cal.date_to_session(t, "next"),
+                                                                                        horizon - 1)
+    return end.strftime("%Y-%m-%d") <= last_price
+
+
+def live_implied_corr(surface: pd.DataFrame, weights: pd.Series, last_price: str, cfg) -> pd.DataFrame:
+    """PLAN 7.2 with instruction 07, one row per day of SURFACE_DAILY: the XLK implied correlation from atm_30 with
+    the holdings `weights` (ticker -> decimal weight) of the captured XLK names that have an atm_30 that day,
+    renormalised (`live_weights`), and the covered weight. Status `ok`, or the conditions joined with `|`:
+    `no_index_vol` (XLK has no atm_30 that day; implied blank), `pending` (the next `live_horizon` sessions are not
+    all in the price data, so the realised columns are blank). Columns LIVE_COLUMNS."""
+    rows = []
+    for day, g in surface.groupby("day", sort=True):
+        vols = g.set_index("ticker")["atm_30"].astype(float)
+        names = vols[vols.index.isin(weights.index) & (vols.index != INDEX)]
+        w, covered = live_weights(weights, names)
+        sig_i = float(vols.get(INDEX, np.nan))
+        flags = [] if np.isfinite(sig_i) else ["no_index_vol"]
+        if not window_complete(day, last_price, cfg.correlation.live_horizon):
+            flags.append("pending")
+        else:  # O-42: realised vols for the live side are not fixed, so a complete window cannot be built yet
+            raise NotImplementedError(f"{day}: realised side of the live implied correlation needs O-42")
+        rows.append({"day": day, "index": INDEX, "index_vol": sig_i, "n_names": len(w), "covered_weight": covered,
+                     "implied_corr": implied_correlation(sig_i, names, weights) if np.isfinite(sig_i) else np.nan,
+                     "realised_index_vol": np.nan, "realised_implied_corr": np.nan,
+                     "realised_avg_pairwise_corr": np.nan, "status": "|".join(flags) or "ok"})
+    return pd.DataFrame(rows, columns=LIVE_COLUMNS)
+
+
+def rv_screen(surface: pd.DataFrame, cfg) -> pd.DataFrame:
+    """PLAN 7.2 with O-15 (a) and instruction 07, one row per SURFACE_DAILY row: the name's atm_30 minus the median
+    atm_30 of its kickoff Section 3.1 group that day (from day 1), and the z-score of atm_30 against the mean and
+    standard deviation (ddof 1) of the name's atm_30 on its prior snapshot days, excluding today, blank with status
+    `below_min_days` until it has `rv_min_days` prior days with an atm_30. A row with no atm_30 has status `no_vol`.
+    Columns RV_COLUMNS, in day then SURFACE_DAILY order."""
+    s = surface[["day", "ticker", "atm_30"]].copy()
+    s["atm_30"] = s["atm_30"].astype(float)
+    s["group"] = [group_of(t, cfg) for t in s["ticker"]]
+    s["group_median"] = s.groupby(["day", "group"], sort=False)["atm_30"].transform("median")
+    s["vol_minus_group_median"] = s["atm_30"] - s["group_median"]
+    rows = []
+    for r in s.itertuples():
+        prior = s.loc[(s["ticker"] == r.ticker) & (s["day"] < r.day), "atm_30"].dropna()
+        z, status = np.nan, "ok"
+        if not np.isfinite(r.atm_30):
+            status = "no_vol"
+        elif len(prior) < cfg.correlation.rv_min_days:
+            status = "below_min_days"
+        else:
+            z = (r.atm_30 - prior.mean()) / prior.std(ddof=1)  # O-15 (a): ddof 1, today excluded
+        rows.append({"day": r.day, "ticker": r.ticker, "group": r.group, "atm_30": r.atm_30, "n_prior": len(prior),
+                     "zscore": z, "group_median": r.group_median, "vol_minus_group_median": r.vol_minus_group_median,
+                     "status": status})
+    return pd.DataFrame(rows, columns=RV_COLUMNS).sort_values("day", kind="stable", ignore_index=True)
