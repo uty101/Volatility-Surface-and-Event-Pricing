@@ -43,6 +43,8 @@ def test_close_has_every_captured_ticker_but_spx():
     for ticker in captured:
         if ticker != "^SPX":
             assert ticker in close.columns, ticker
+    adj = pd.read_parquet(RAW / "prices" / "adj_close.parquet")  # instruction 08 step 8.0
+    assert adj.columns.tolist() == close.columns.tolist() and adj.index.equals(close.index)
 
 
 def test_xlk_weights_sum():
@@ -114,6 +116,8 @@ def test_pull_uses_fake_session(tmp_path):
     assert list(holdings.columns) == ["ticker", "name", "weight", "shares", "as_of_date"]
     close = pd.read_parquet(tmp_path / "prices" / "close.parquet")
     assert close.index.tolist() == [date(2026, 10, 26), date(2026, 10, 27)] and close.shape[1] == 36
+    adj = pd.read_parquet(tmp_path / "prices" / "adj_close.parquet")  # instruction 08 step 8.0
+    assert adj.columns.tolist() == close.columns.tolist() and (adj.to_numpy() == [[9.5], [10.5]]).all()
     assert pd.read_parquet(tmp_path / "prices" / "index.parquet").columns.tolist() == ["^GSPC", "^SP500TR"]
     assert pd.read_parquet(tmp_path / "prices" / "sectors.parquet")["XLK"].tolist() == [9.5, 10.5]
     divs = pd.read_csv(tmp_path / "prices" / "dividends.csv")

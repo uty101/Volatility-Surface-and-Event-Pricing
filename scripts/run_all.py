@@ -167,9 +167,10 @@ def concat_surface(parts: list[dict[str, pd.DataFrame]]) -> dict[str, pd.DataFra
 
 
 def surface_key(iv_path: Path, cfg) -> str:
-    """Instruction 07 step 7.0: sha256 over volsurf/svi.py, volsurf/ssvi.py, the [svi] and [surface] config tables
-    and the day's IV file (the sha256 of each part, concatenated, hashed again)."""
-    tables = [json.dumps(dataclasses.asdict(t), sort_keys=True).encode() for t in (cfg.svi, cfg.surface)]
+    """Instruction 07 step 7.0: sha256 over volsurf/svi.py, volsurf/ssvi.py, the [svi], [surface] and (instruction 08
+    step 8.0, because `int_points` sets the acceptance grid) [density] config tables and the day's IV file (the sha256
+    of each part, concatenated, hashed again)."""
+    tables = [json.dumps(dataclasses.asdict(t), sort_keys=True).encode() for t in (cfg.svi, cfg.surface, cfg.density)]
     parts = [(ROOT / "volsurf" / "svi.py").read_bytes(), (ROOT / "volsurf" / "ssvi.py").read_bytes(), *tables,
              iv_path.read_bytes()]
     return hashlib.sha256(b"".join(hashlib.sha256(p).digest() for p in parts)).hexdigest()
@@ -691,12 +692,14 @@ def stage_cor3m(cfg) -> Path:
 
 def stage_live_corr(cfg) -> Path:
     """PLAN 7.2 with instruction 07: implied_corr_live.csv (XLK implied correlation per SURFACE_DAILY day, weights from
-    data/raw/ssga/xlk_holdings_2026-10-28.csv) and rv_screen.csv."""
+    data/raw/ssga/xlk_holdings_2026-10-28.csv; the realised side from adj_close.parquet, instruction 08) and
+    rv_screen.csv."""
     surface = pd.read_csv(TABLES / "surface_daily.csv", dtype={"day": str})
     holdings = pd.read_csv(RAW / "ssga" / "xlk_holdings_2026-10-28.csv")  # instruction 07 step 7.2: not refreshed
     weights = holdings.dropna(subset=["ticker"]).set_index("ticker")["weight"]
-    last_price = pd.Timestamp(pd.read_parquet(RAW / "prices" / "close.parquet").index.max()).strftime("%Y-%m-%d")
-    live = live_implied_corr(surface, weights, last_price, cfg)
+    adj = pd.read_parquet(RAW / "prices" / "adj_close.parquet")
+    last_price = pd.Timestamp(adj.index.max()).strftime("%Y-%m-%d")
+    live = live_implied_corr(surface, weights, adj, last_price, cfg)
     rv = rv_screen(surface, cfg)
     TABLES.mkdir(parents=True, exist_ok=True)
     live.to_csv(TABLES / "implied_corr_live.csv", **CSV)

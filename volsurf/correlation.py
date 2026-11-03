@@ -124,12 +124,45 @@ def window_complete(day: str, last_price: str, horizon: int) -> bool:
     return end.strftime("%Y-%m-%d") <= last_price
 
 
-def live_implied_corr(surface: pd.DataFrame, weights: pd.Series, last_price: str, cfg) -> pd.DataFrame:
-    """PLAN 7.2 with instruction 07, one row per day of SURFACE_DAILY: the XLK implied correlation from atm_30 with
-    the holdings `weights` (ticker -> decimal weight) of the captured XLK names that have an atm_30 that day,
-    renormalised (`live_weights`), and the covered weight. Status `ok`, or the conditions joined with `|`:
-    `no_index_vol` (XLK has no atm_30 that day; implied blank), `pending` (the next `live_horizon` sessions are not
-    all in the price data, so the realised columns are blank). Columns LIVE_COLUMNS."""
+def window_returns(prices: pd.DataFrame, day: str, horizon: int) -> pd.DataFrame:
+    """The daily log returns of every column of `prices` (adjusted closes indexed by date) over the `horizon` XNYS
+    sessions after `day`, the first from the close of `day`; one row per session."""
+    cal = _xnys()
+    t = pd.Timestamp(day)
+    start = t if cal.is_session(t) else cal.date_to_session(t, "previous")
+    sessions = [start, *(cal.session_offset(start, j) for j in range(1, horizon + 1))]
+    p = prices.copy()
+    p.index = pd.DatetimeIndex(p.index)
+    return np.log(p.reindex(pd.DatetimeIndex(sessions).tz_localize(None))).diff().iloc[1:]
+
+
+def realised_vol(returns: pd.DataFrame) -> pd.Series:
+    """O-42 (a) with the realised vol of (b), instruction 08: sqrt(252 / h x sum r^2) over the h daily log returns,
+    not demeaned, as Section 5.9 RV (252: Convention 4.14). NaN for a column with a missing return."""
+    h = len(returns)
+    return np.sqrt(252 / h * (returns**2).sum(skipna=False))
+
+
+def realised_side(prices: pd.DataFrame, day: str, names: pd.Index, weights: pd.Series, horizon: int) -> dict:
+    """Kickoff 5.8 realised side with O-42 (a) and instruction 08: over sessions t+1 to t+`horizon`, the realised vol
+    of XLK and of `names` (`realised_vol`), the implied correlation formula on those realised vols with the same
+    renormalised weights (`implied_correlation`), and the average pairwise Pearson correlation (demeaned) of the
+    names' daily log returns (`avg_pairwise_corr`, NaN with fewer than 2 names)."""
+    rets = window_returns(prices[[INDEX, *names]], day, horizon)
+    rv = realised_vol(rets)
+    return {"realised_index_vol": float(rv[INDEX]),
+            "realised_implied_corr": implied_correlation(float(rv[INDEX]), rv[list(names)], weights),
+            "realised_avg_pairwise_corr": avg_pairwise_corr(rets[list(names)]) if len(names) >= 2 else np.nan}
+
+
+def live_implied_corr(surface: pd.DataFrame, weights: pd.Series, prices: pd.DataFrame, last_price: str,
+                      cfg) -> pd.DataFrame:
+    """PLAN 7.2 with instructions 07 and 08, one row per day of SURFACE_DAILY: the XLK implied correlation from
+    atm_30 with the holdings `weights` (ticker -> decimal weight) of the captured XLK names that have an atm_30 that
+    day, renormalised (`live_weights`), and the covered weight; once the next `live_horizon` sessions are all on or
+    before `last_price`, the realised side from the adjusted closes `prices` over the same names (`realised_side`).
+    Status `ok`, or the conditions joined with `|`: `no_index_vol` (XLK has no atm_30 that day; implied blank),
+    `pending` (the window is not complete, so the realised columns are blank). Columns LIVE_COLUMNS."""
     rows = []
     for day, g in surface.groupby("day", sort=True):
         vols = g.set_index("ticker")["atm_30"].astype(float)
@@ -137,14 +170,15 @@ def live_implied_corr(surface: pd.DataFrame, weights: pd.Series, last_price: str
         w, covered = live_weights(weights, names)
         sig_i = float(vols.get(INDEX, np.nan))
         flags = [] if np.isfinite(sig_i) else ["no_index_vol"]
-        if not window_complete(day, last_price, cfg.correlation.live_horizon):
+        realised = {"realised_index_vol": np.nan, "realised_implied_corr": np.nan,
+                    "realised_avg_pairwise_corr": np.nan}
+        if window_complete(day, last_price, cfg.correlation.live_horizon):
+            realised = realised_side(prices, day, w.index, weights, cfg.correlation.live_horizon)
+        else:
             flags.append("pending")
-        else:  # O-42: realised vols for the live side are not fixed, so a complete window cannot be built yet
-            raise NotImplementedError(f"{day}: realised side of the live implied correlation needs O-42")
         rows.append({"day": day, "index": INDEX, "index_vol": sig_i, "n_names": len(w), "covered_weight": covered,
                      "implied_corr": implied_correlation(sig_i, names, weights) if np.isfinite(sig_i) else np.nan,
-                     "realised_index_vol": np.nan, "realised_implied_corr": np.nan,
-                     "realised_avg_pairwise_corr": np.nan, "status": "|".join(flags) or "ok"})
+                     **realised, "status": "|".join(flags) or "ok"})
     return pd.DataFrame(rows, columns=LIVE_COLUMNS)
 
 

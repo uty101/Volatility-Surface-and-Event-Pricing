@@ -17,7 +17,9 @@ from volsurf.correlation import (
     live_implied_corr,
     live_weights,
     newey_west,
+    realised_vol,
     rv_screen,
+    window_returns,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,7 +100,7 @@ def test_weights_renormalised_and_covered_weight():
     surface = pd.DataFrame({"day": ["2026-10-29"] * 4 + ["2026-10-30"] * 3,
                             "ticker": ["XLK", "A", "B", "C", "A", "B", "C"],
                             "atm_30": [0.22, 0.30, 0.20, np.nan, 0.31, 0.21, 0.25]})
-    live = live_implied_corr(surface, weights, "2026-11-02", CFG)
+    live = live_implied_corr(surface, weights, pd.DataFrame(), "2026-11-02", CFG)
     print(live.to_string())
     assert list(live.columns) == LIVE_COLUMNS
     r = live.set_index("day")
@@ -109,6 +111,42 @@ def test_weights_renormalised_and_covered_weight():
     assert r.loc["2026-10-30", "covered_weight"] == pytest.approx(0.60, abs=1e-15)
     assert r.loc["2026-10-30", "status"] == "no_index_vol|pending" and np.isnan(r.loc["2026-10-30", "implied_corr"])
     assert r[["realised_index_vol", "realised_implied_corr", "realised_avg_pairwise_corr"]].isna().all(axis=None)
+
+
+def test_realised_side_known_panel():
+    """Instruction 08 step 8.0 (O-42): a synthetic 3-name panel over the 21 sessions after 2026-10-28 whose realised
+    vols and correlations are known exactly. Columns of X are demeaned, unit norm and equicorrelated at 0.4, so
+    name i's returns c_i X_i have sum r^2 = c_i^2 (realised vol c_i sqrt(252 / 21)) and Pearson correlation 0.4 with
+    each other; XLK's returns are the weighted sum, so the implied correlation formula on realised vols gives 0.4."""
+    from volsurf.snapshots import _xnys
+
+    h, rho, day = CFG.correlation.live_horizon, 0.4, "2026-10-28"
+    cal = _xnys()
+    sessions = [pd.Timestamp(day), *(cal.session_offset(pd.Timestamp(day), j) for j in range(1, h + 1))]
+    sessions = pd.DatetimeIndex(sessions).tz_localize(None)
+    z = np.random.default_rng(CFG.run.seed).normal(size=(h, 3))
+    q, _ = np.linalg.qr(z - z.mean(axis=0))  # orthonormal, demeaned columns
+    x = q @ np.linalg.cholesky(np.full((3, 3), rho) + np.eye(3) * (1 - rho)).T
+    c = np.array([0.02, 0.03, 0.05])
+    weights = pd.Series({"A": 0.30, "B": 0.20, "C": 0.10, "D": 0.05})  # D is not captured
+    w = (weights[["A", "B", "C"]] / 0.60).to_numpy()
+    rets = np.column_stack([x * c, (x * c) @ w])
+    prices = pd.DataFrame(100 * np.exp(np.vstack([np.zeros(4), np.cumsum(rets, axis=0)])), index=sessions,
+                          columns=["A", "B", "C", "XLK"])
+    surface = pd.DataFrame({"day": day, "ticker": ["XLK", "A", "B", "C"], "atm_30": [0.22, 0.30, 0.20, 0.25]})
+    live = live_implied_corr(surface, weights, prices, sessions[-1].strftime("%Y-%m-%d"), CFG)
+    print(live.to_string())
+    r = live.iloc[0]
+    assert r["status"] == "ok" and r["n_names"] == 3 and r["covered_weight"] == pytest.approx(0.60, abs=1e-15)
+    rv = realised_vol(window_returns(prices, day, h))
+    assert rv[["A", "B", "C"]].to_numpy() == pytest.approx(c * np.sqrt(252 / h), rel=1e-12)
+    xlk = np.sqrt(252 / h * float(w @ (c[:, None] * c * np.corrcoef(x, rowvar=False)) @ w))
+    assert r["realised_index_vol"] == pytest.approx(xlk, rel=1e-12)
+    assert r["realised_implied_corr"] == pytest.approx(rho, abs=1e-12)
+    assert r["realised_avg_pairwise_corr"] == pytest.approx(rho, abs=1e-12)
+    # one session short of the window: pending, realised blank
+    short = live_implied_corr(surface, weights, prices, sessions[-2].strftime("%Y-%m-%d"), CFG).iloc[0]
+    assert short["status"] == "pending" and np.isnan(short["realised_index_vol"])
 
 
 def test_rv_screen_blank_below_min_days():

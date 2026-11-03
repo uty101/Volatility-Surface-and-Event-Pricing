@@ -228,6 +228,7 @@ def stage_prices(ticker_factory, last_session: date, cfg, raw_root: Path = RAW) 
           "auto_adjust=False, actions=True)"
     files = {
         "close.parquet": history_frames(hist, "Close"),
+        "adj_close.parquet": history_frames(hist, "Adj Close"),  # O-42 (a), instruction 08 step 8.0
         "index.parquet": history_frames(index_hist, "Close"),
         "sectors.parquet": history_frames(sector_hist, "Adj Close"),
     }

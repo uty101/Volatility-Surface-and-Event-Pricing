@@ -103,6 +103,9 @@ def test_cache_svi_edit_refits_all_days(monkeypatch, tmp_path):
     assert _cache_run(monkeypatch, tmp_path, edited, DAYS) == 0
     surface = dataclasses.replace(CFG, surface=dataclasses.replace(CFG.surface, delta=0.2))
     assert _cache_run(monkeypatch, tmp_path, surface, DAYS) == 3
+    density = dataclasses.replace(surface, density=dataclasses.replace(surface.density, int_points=100001))
+    assert _cache_run(monkeypatch, tmp_path, density, DAYS) == 3  # instruction 08: [density] is in the key
+    assert _cache_run(monkeypatch, tmp_path, density, DAYS) == 0
     (tmp_path / "iv" / f"{DAYS[1]}.parquet").write_bytes(
         (tmp_path / "iv" / f"{DAYS[1]}.parquet").read_bytes() + b"\0")  # one day's IV file changes
     assert run_all.surface_key(tmp_path / "iv" / f"{DAYS[1]}.parquet", surface) != run_all.surface_key(
