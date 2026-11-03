@@ -1,5 +1,6 @@
+import subprocess
 import tomllib
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -105,3 +106,65 @@ def test_already_captured():
     assert not already_captured(None, 33)
     assert already_captured(33, 33)
     assert not already_captured(20, 33)
+
+
+class _FakeRun:
+    """Fake clock, sleep and gh for scripts/snapshot.py --wait (instruction 06 step 6.0): the release holds no
+    snaplog for the day, and every gh call succeeds."""
+
+    def __init__(self, start: datetime):
+        self.now = start
+        self.sleeps: list[float] = []
+        self.gh_calls: list[tuple[str, ...]] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now = self.now + timedelta(seconds=seconds)
+
+    def gh(self, *args: str) -> subprocess.CompletedProcess:
+        self.gh_calls.append(args)
+        return subprocess.CompletedProcess(["gh", *args], 0, stdout="", stderr="")
+
+
+def _wait(start: datetime, monkeypatch, tmp_path):
+    from scripts import snapshot
+
+    fake = _FakeRun(start)
+    monkeypatch.setattr(snapshot, "now_utc", lambda: fake.now)
+    monkeypatch.setattr(snapshot.time, "sleep", fake.sleep)
+    monkeypatch.setattr(snapshot, "gh", fake.gh)
+    go = snapshot.wait_for_target(tmp_path, "actions", CFG)
+    log = (tmp_path / "snapshot.log").read_text(encoding="utf-8").splitlines() if (tmp_path / "snapshot.log").exists() else []
+    return go, fake, log
+
+
+def _dispatches(fake: _FakeRun) -> list[tuple[str, ...]]:
+    return [c for c in fake.gh_calls if c[:2] == ("workflow", "run")]
+
+
+def test_wait_chains_when_above_max_wait(monkeypatch, tmp_path):
+    # instruction 06 step 6.0: 09:17 UTC on 2026-11-04 is 04:17 EST, 673 minutes before 15:30 New York
+    go, fake, log = _wait(datetime(2026, 11, 4, 9, 17, tzinfo=UTC), monkeypatch, tmp_path)
+    assert seconds_until_target(datetime(2026, 11, 4, 9, 17, tzinfo=UTC), CFG) == 673 * 60
+    assert not go
+    assert fake.sleeps == [CFG["snapshot"]["max_wait_s"]]
+    assert _dispatches(fake) == [("workflow", "run", "snapshot.yml", "--ref", "main")]
+    assert log[-1].endswith(f"chained: dispatched a new run with {673 * 60 - 19800} seconds still to wait")
+    print("\n".join(log))
+
+
+def test_wait_captures_after_193_minutes(monkeypatch, tmp_path):
+    go, fake, log = _wait(datetime(2026, 11, 4, 17, 17, tzinfo=UTC), monkeypatch, tmp_path)
+    assert go
+    assert fake.sleeps == [193 * 60]
+    assert _dispatches(fake) == []
+    print("\n".join(log))
+
+
+def test_wait_skips_after_the_window(monkeypatch, tmp_path):
+    go, fake, log = _wait(datetime(2026, 11, 4, 22, 0, tzinfo=UTC), monkeypatch, tmp_path)
+    assert not go
+    assert fake.sleeps == []
+    assert _dispatches(fake) == []
+    assert "wait: not a session or after the window" in log[-1]
+    print("\n".join(log))

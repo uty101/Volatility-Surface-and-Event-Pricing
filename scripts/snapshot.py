@@ -198,7 +198,10 @@ def captured_today(out: Path, runner: str, cfg: dict) -> bool:
 
 
 def wait_for_target(out: Path, runner: str, cfg: dict) -> bool:
-    """--wait (instruction 03c step 3c.1): checks (a) to (c). False means exit 0 without capturing."""
+    """--wait (instruction 03c step 3c.1): checks (a) to (c). False means exit 0 without capturing.
+
+    A wait above max_wait_s (instruction 06 step 6.0) sleeps max_wait_s, repeats check (a), then dispatches a
+    fresh non-forced run of this workflow to carry on the wait, and exits 0."""
     if captured_today(out, runner, cfg):
         return False
     now = now_utc()
@@ -206,6 +209,19 @@ def wait_for_target(out: Path, runner: str, cfg: dict) -> bool:
     if wait is None:
         append_log(out, f"{now.isoformat()} skip runner={runner} ny={now.astimezone(NY):%Y-%m-%d %H:%M:%S} "
                         f"wait: not a session or after the window")
+        return False
+    max_wait = cfg["snapshot"]["max_wait_s"]
+    if wait > max_wait:
+        append_log(out, f"{now.isoformat()} waiting {max_wait} seconds of {wait:.0f}, then chaining")
+        time.sleep(max_wait)
+        if captured_today(out, runner, cfg):
+            return False
+        now = now_utc()
+        left = seconds_until_target(now, cfg)
+        dispatched = gh("workflow", "run", "snapshot.yml", "--ref", "main")
+        if dispatched.returncode != 0:
+            raise RuntimeError(f"gh workflow run failed: {dispatched.stderr.strip()}")
+        append_log(out, f"{now.isoformat()} chained: dispatched a new run with {left:.0f} seconds still to wait")
         return False
     if wait > 0:
         append_log(out, f"{now.isoformat()} waiting {wait:.0f} seconds until {cfg['snapshot']['target_ny']} New York")
