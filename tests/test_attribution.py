@@ -20,6 +20,7 @@ from volsurf.attribution import (
     straddle_delta,
     straddle_greeks,
     straddle_value,
+    theta_value,
 )
 from volsurf.config import load_config
 from volsurf.greeks import greeks
@@ -47,12 +48,13 @@ def test_identity_exact(seed):
 
 
 def test_bs_path_explained_share_measure():
-    # MEASURE (instruction 09 step 9.1): printed for the reviewer, asserts only that it is finite (rule 5)
+    # the MEASURE of instruction 09 step 9.1, bound set by instruction 10 step 10.0: median share >= 0.90
     rows = bs_path_attribution(CFG)
     share = float(rows["explained_share"].median())
     print(rows[["day", "S", "dS", "dsigma", *COMPONENTS, "residual", "option", "total", "explained_share"]].to_string())
     print(f"MEASURE median explained share, {len(rows)} daily steps: {share:.6f}")
-    assert np.isfinite(share)
+    print(rows[["day", "explained_share"]].tail(5).to_string())
+    assert share >= 0.90
     assert (rows["dsigma"] == 0).all()
 
 
@@ -68,11 +70,18 @@ def test_total_is_the_change_in_value_plus_hedge():
     assert a["delta"] + a["hedge"] == 0
 
 
-def test_theta_reprices_with_only_t_shortened():
+def test_theta_rolls_t_f_and_d():
+    # instruction 10 step 10.0: S and vol fixed, T, D and F all moved on; nothing from t1 but dt enters
     t0, t1 = _mark(0.08, 101.0, 0.2), _mark(0.07, 90.0, 0.5)
     a = attribute_day(POS, t0, t1)
-    want = straddle_value(t0["F"], 100.0, 0.07, t0["D"], 0.2) - straddle_value(t0["F"], 100.0, 0.08, t0["D"], 0.2)
+    rolled = straddle_value(101.0 * np.exp(0.03 * 0.07), 100.0, 0.07, np.exp(-0.04 * 0.07), 0.2)
+    want = rolled - straddle_value(t0["F"], 100.0, 0.08, t0["D"], 0.2)
     assert a["theta"] == pytest.approx(-want, rel=1e-12)
+
+
+def test_theta_to_expiry_is_the_value_at_spot():
+    # the clock runs out with S fixed, so F has rolled to S and D to 1: the value left is |S - K|
+    assert theta_value(103.0, 103.5, 100.0, 0.01, 0.9996, 0.2, 0.01) == pytest.approx(3.0, rel=1e-12)
 
 
 def test_dsigma_is_the_contract_vol_change():

@@ -35,7 +35,7 @@ def straddle_value(F: float, K: float, T: float, D: float, sigma: float) -> floa
 def straddle_greeks(S: float, F: float, K: float, T: float, D: float, sigma: float) -> dict:
     """Greeks of the long straddle (instruction 09 step 9.1), vega per 1.00 of vol (Convention 4.10). With V =
     D (F (2 N(d1) - 1) - K (2 N(d2) - 1)), the S derivatives are the F derivatives by the chain rule with F / S held
-    fixed: dF / dS = F / S. Delta is the spot delta of O-44 (a). Theta is not here: `attribute_day` reprices."""
+    fixed: dF / dS = F / S. Delta is the spot delta of O-44 (a). Theta is not here: `attribute_day` uses `theta_value`."""
     sd = sigma * np.sqrt(T)
     d1 = (np.log(F / K) + sd**2 / 2) / sd
     d2 = d1 - sd
@@ -47,6 +47,16 @@ def straddle_greeks(S: float, F: float, K: float, T: float, D: float, sigma: flo
             "volga": float(vega * d1 * d2 / sigma)}
 
 
+def theta_value(S: float, F: float, K: float, T: float, D: float, sigma: float, dt: float) -> float:
+    """Instruction 10 step 10.0: the straddle's value with S and sigma fixed and the clock moved on by dt. r and q are
+    implied by the day's D and F / S, and T - dt takes both with it: D rolls to e^(-r (T - dt)) and F to
+    S e^((r - q)(T - dt)). This is the time decay a desk reports. Shortening T alone would leave F and D where they
+    were, so the roll of the carry would land in the residual, and near expiry that roll dominates the day's move."""
+    r, carry = -np.log(D) / T, np.log(F / S) / T
+    T1 = T - dt
+    return straddle_value(S * np.exp(carry * T1), K, T1, np.exp(-r * T1), sigma)
+
+
 def attribute_day(pos: pd.Series, t0: dict, t1: dict) -> dict:
     """Kickoff 5.10 for 1 straddle between 2 marks. `pos`: strike and side (-1 short). `t0`, `t1`: T, S, F, D, vol.
 
@@ -54,8 +64,8 @@ def attribute_day(pos: pd.Series, t0: dict, t1: dict) -> dict:
     total = delta dS + 1/2 gamma dS^2 + theta dt + vega dsigma + vanna dS dsigma + 1/2 volga dsigma^2 + hedge + residual
 
     with every Greek at t0 and times the side, hedge = -side delta dS, and the residual the difference. dt = T0 - T1,
-    which is t1 - t0 in years (Convention 4.1), as both T run to the same expiry. The theta term is V(T0 - dt) - V(T0)
-    with F, D and vol held at t0.
+    which is t1 - t0 in years (Convention 4.1), as both T run to the same expiry. The theta term is `theta_value` - V0:
+    S and vol stay at t0, while T, F and D all roll on by dt.
 
     dsigma is the change in the contract's SSVI vol: at the same strike, at T1 on t1 minus at T0 on t0. It is not a
     change at constant maturity, so the part of the move that comes from T shortening along the surface's term
@@ -69,7 +79,7 @@ def attribute_day(pos: pd.Series, t0: dict, t1: dict) -> dict:
     v0 = straddle_value(F0, K, T0, D0, vol0)
     v1 = straddle_value(t1["F"], K, t1["T"], t1["D"], t1["vol"])
     parts = {"delta": side * g["delta"] * dS, "gamma": side * g["gamma"] * dS**2 / 2,
-             "theta": side * (straddle_value(F0, K, T0 - dt, D0, vol0) - v0), "vega": side * g["vega"] * dsigma,
+             "theta": side * (theta_value(S0, F0, K, T0, D0, vol0, dt) - v0), "vega": side * g["vega"] * dsigma,
              "vanna": side * g["vanna"] * dS * dsigma, "volga": side * g["volga"] * dsigma**2 / 2,
              "hedge": -side * g["delta"] * dS}
     option = side * (v1 - v0)
