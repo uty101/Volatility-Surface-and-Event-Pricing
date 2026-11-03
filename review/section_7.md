@@ -254,18 +254,22 @@ No name has 20 prior snapshot days, so every z-score is blank.
 `.venv\Scripts\python -m pytest -p socket --disable-socket -q` on Windows at `b2b50e5` (before the cache-test fix; the suite runs the cache tests after `test_surface_run_fixture`, which fills `_tables()` first):
 
 ```
-recorded in the next commit, when the run ends
+4548 passed, 11 warnings in 2241.41s (0:37:21)
 ```
 
 `.venv\Scripts\ruff check .`: `All checks passed!`
 
 ## Fresh-clone check
 
-Recorded in the next commit, at the pushed head.
+At `b05fed2` (Windows, `C:\vs7`): `git clone`, `uv venv --python 3.12`, `uv pip install -r requirements-lock.txt`, `uv pip install -e . --no-deps`, then `.venv\Scripts\python -m pytest -p socket --disable-socket -q`:
+
+```
+4548 passed, 11 warnings in 2173.94s (0:36:13)
+```
 
 ### CI
 
-Recorded in the next commit.
+On `b05fed2` (run 41691344569, Linux): success. Ruff `All checks passed!`; pytest `4548 passed, 11 warnings in 912.90s (0:15:12)`.
 
 ## Runtime per step
 
