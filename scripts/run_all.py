@@ -2,7 +2,8 @@
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
-the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp and strategies stages.
+the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp and strategies stages, Section 9
+the attribution stage.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from volsurf.attribution import attribute_live, bs_path_attribution, simulate_hedging
 from volsurf.config import load_config
 from volsurf.correlation import STUDY_COLUMNS, cor3m_study, live_implied_corr, rv_screen
 from volsurf.data import RATE_TENORS, SPX, capture_health, clean_chain, load_snapshot
@@ -907,10 +909,28 @@ def stage_strategies(cfg) -> Path:
     return TABLES / "strategy_stats.csv"
 
 
+def stage_attribution(cfg) -> Path:
+    """PLAN 9.2 with instruction 09: hedging_frequency.csv and attribution_live.csv (reads live_straddles.csv), and
+    the MEASURE of step 9.1."""
+    freq = pd.concat([simulate_hedging(m, cfg) for m in ("gbm", "heston")], ignore_index=True)
+    live = attribute_live(pd.read_csv(TABLES / "live_straddles.csv", dtype={"open_day": str, "expiry": str,
+                                                                           "mark_day": str}))
+    TABLES.mkdir(parents=True, exist_ok=True)
+    freq.to_csv(TABLES / "hedging_frequency.csv", **CSV)
+    live.to_csv(TABLES / "attribution_live.csv", **CSV)
+    path = bs_path_attribution(cfg)
+    print(path.to_string())
+    print(f"MEASURE median explained share, {len(path)} daily steps: {path['explained_share'].median():.6f}")
+    print(freq.to_string())
+    print(live.to_string())
+    print(f"median explained share, {len(live)} live moves: {live['explained_share'].median():.6f}")
+    return TABLES / "hedging_frequency.csv"
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
-          "vrp": stage_vrp, "strategies": stage_strategies}
+          "vrp": stage_vrp, "strategies": stage_strategies, "attribution": stage_attribution}
 
 
 def main(argv: list[str] | None = None) -> int:
