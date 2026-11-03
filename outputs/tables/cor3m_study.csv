@@ -1,0 +1,2 @@
+n,first_t,last_t,horizon,maxlags,intercept,intercept_nw_se,slope,slope_nw_se,r2,mean_implied,mean_realised,mean_gap,gap_note
+5163,2006-01-03,2026-08-04,63,63,0.2862327394,0.03712862142,0.7114599159,0.07396864975,0.4373447472,0.4125863645,0.5797713996,-0.1671850351,"sector-level proxy: sector ETFs are diversified baskets and correlate with each other more than the single stocks behind COR3M, so implied sits below realised; the gap is the proxy, not a correlation risk premium"

@@ -2,7 +2,7 @@
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
-the events stage.
+the events stage, Section 7 the cor3m stage.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from volsurf.config import load_config
+from volsurf.correlation import STUDY_COLUMNS, cor3m_study
 from volsurf.data import RATE_TENORS, SPX, capture_health, clean_chain, load_snapshot
 from volsurf.density import (
     CHECK_COLUMNS,
@@ -646,10 +647,52 @@ def stage_events(cfg) -> Path:
     return TABLES / "events.csv"
 
 
+def fig_cor3m(series: pd.DataFrame, study: dict) -> Path:
+    """cor3m_vs_realised.png (instruction 07 part C): COR3M / 100 on day t and the forward realised average pairwise
+    correlation of the 9 sector SPDRs over sessions t+1 to t+63, the gap between them shaded."""
+    plt = _plt()
+    fig, ax = plt.subplots(figsize=(11, 5))
+    t = series["t"]
+    ax.fill_between(t, series["implied"], series["realised"], where=series["gap"] >= 0, color="C0", alpha=0.25,
+                    lw=0, label="implied above realised")
+    ax.fill_between(t, series["implied"], series["realised"], where=series["gap"] < 0, color="C3", alpha=0.25,
+                    lw=0, label="implied below realised")
+    ax.plot(t, series["implied"], color="C0", lw=0.8, label="COR3M / 100 on day t (implied)")
+    ax.plot(t, series["realised"], color="C3", lw=0.8, label="sector SPDR realised, sessions t+1 to t+63")
+    ax.set_ylabel("correlation")
+    ax.set_title(f"COR3M against forward realised sector correlation, {study['first_t']} to {study['last_t']} "
+                 f"(n {study['n']}): slope {study['slope']:.3f}, R² {study['r2']:.3f}, mean gap "
+                 f"{study['mean_gap']:.3f}", fontsize=10)
+    fig.text(0.01, 0.01, "Sector-level proxy: sector ETFs are diversified baskets and correlate with each other more "
+             "than the single stocks behind COR3M,\nso implied sits below realised. The gap is the proxy, not a "
+             "correlation risk premium.", fontsize=8)
+    ax.legend(fontsize=8, loc="upper left")
+    ax.grid(alpha=0.3)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    return _save(fig, FIGURES / "cor3m_vs_realised.png")
+
+
+def stage_cor3m(cfg) -> Path:
+    """PLAN 7.1 with instruction 07: the COR3M study on data/raw/cboe/COR3M.csv and data/raw/prices/sectors.parquet
+    (cor3m_study.csv, STUDY_COLUMNS) and cor3m_vs_realised.png."""
+    cor3m = pd.read_csv(RAW / "cboe" / "COR3M.csv", parse_dates=["date"]).set_index("date")["close"]
+    sectors = pd.read_parquet(RAW / "prices" / "sectors.parquet")[list(cfg.universe.sector_spdrs)]
+    study = cor3m_study(cor3m, sectors, cfg.correlation.cor3m_horizon, cfg.correlation.nw_maxlags)
+    table = pd.DataFrame([{c: study[c] for c in STUDY_COLUMNS}])
+    TABLES.mkdir(parents=True, exist_ok=True)
+    out = TABLES / "cor3m_study.csv"
+    table.to_csv(out, **CSV)
+    print(table.T.to_string())
+    print(study["series"].head(3).to_string())
+    print(study["series"].tail(3).to_string())
+    fig_cor3m(study["series"], study)
+    return out
+
+
 
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
-          "tails": stage_tails, "events": stage_events}
+          "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m}
 
 
 def main(argv: list[str] | None = None) -> int:
