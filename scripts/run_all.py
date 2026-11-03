@@ -1,7 +1,8 @@
 """Rebuild entry point (O-1 (a)): each step's driver is a stage, run with --stage <name>.
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
-Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages.
+Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
+the events stage.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from volsurf.density import (
     svi_density,
     tail_probs,
 )
+from volsurf.events import event_summary, event_table, event_windows, macro_windows
 from volsurf.forwards import clean_with_forwards
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
@@ -460,9 +462,119 @@ def stage_tails(cfg) -> Path:
     return TABLES / "tail_probs.csv"
 
 
+def _chain_inputs(day: date, tickers: set[str], cfg) -> pd.DataFrame:
+    """One day's clean chain, both sides, with the IV stage inputs (S, F, mid; `iv_inputs`) for `tickers`, each
+    ticker used only if its SNAPLOG status is ok (O-5 (b)); the fixture day from tests/fixtures."""
+    if day == FIXTURE_DAY:
+        chains = pd.read_parquet(FIXTURES / "chains_sample.parquet")
+        underlying = pd.read_csv(FIXTURES / "underlying_sample.csv")
+    else:
+        snap = load_snapshot(day, SNAPSHOTS)
+        tickers = tickers & set(snap["snaplog"].loc[snap["snaplog"]["status"] == "ok", "ticker"])
+        chains, underlying = snap["chains"], snap["underlying"]
+    chains, underlying = chains[chains["ticker"].isin(tickers)], underlying[underlying["ticker"].isin(tickers)]
+    fred, divs = _fred(), pd.read_csv(RAW / "prices" / "dividends.csv")
+    clean, _, forwards = clean_with_forwards(chains, underlying, fred, day, cfg)
+    return iv_inputs(clean, underlying, fred, divs, forwards, day, cfg)
+
+
+def event_inputs(cfg) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, set[str]]]:
+    """PLAN 6.2: windows for every earnings event dated on or after the capture start (from the fixture's and every
+    snapshot day's EARNINGS asset, with data/manual/earnings_overrides.csv) and every macro event in
+    data/manual/macro_events.csv; the SVI fits; and the days each ticker has fits on (its snapshot days)."""
+    manual = ROOT / "data" / "manual"
+    assets = [FIXTURES / "earnings_sample.csv", *sorted(SNAPSHOTS.glob("earnings_*.csv"))]
+    earnings = pd.concat([pd.read_csv(p, dtype=str) for p in assets], ignore_index=True)
+    earnings = earnings[earnings["event_ts_ny"].str[:10] >= CAPTURE_START.isoformat()]  # New York event date
+    windows = event_windows(earnings, pd.read_csv(manual / "earnings_overrides.csv", dtype=str))
+    windows = pd.concat([windows, macro_windows(pd.read_csv(manual / "macro_events.csv", dtype=str))],
+                        ignore_index=True)
+    windows = windows.sort_values(["event_date", "ticker"], kind="stable", ignore_index=True)
+    fits = read_fits()
+    return windows, fits, fits.groupby("ticker")["day"].agg(set).to_dict()
+
+
+def fig_event_scatter(events: pd.DataFrame) -> Path:
+    """event_scatter.png (PLAN 6.2): implied move (term structure and straddle) against realised, 45-degree line."""
+    plt = _plt()
+    done = events[events["realised_move"].notna()]
+    fig, ax = plt.subplots(figsize=(7, 6.5))
+    top = float(np.nanmax(done[["straddle_move", "ts_move", "realised_move"]].to_numpy() * 100)) * 1.15
+    ax.plot([0, top], [0, top], color="0.5", lw=1, ls="--", label="45-degree line")
+    ax.plot(done["ts_move"] * 100, done["realised_move"] * 100, "o", color="C0", label="term structure M_t")
+    ax.plot(done["straddle_move"] * 100, done["realised_move"] * 100, "x", color="C3", label="straddle M_s")
+    for r in done.itertuples():
+        ax.annotate(f"{r.ticker} {r.event_date}", (np.nanmax([r.ts_move, r.straddle_move]) * 100,
+                                                    r.realised_move * 100), fontsize=7, xytext=(4, 2),
+                    textcoords="offset points")
+    ax.set_xlim(0, top)
+    ax.set_ylim(0, top)
+    ax.set_xlabel("implied move (%)")
+    ax.set_ylabel("realised move |ln(close_end / close_start)| (%)")
+    ax.set_title(f"Implied against realised event moves, {len(done)} events with a realised move")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    return _save(fig, FIGURES / "event_scatter.png")
+
+
+def fig_event_term_structures(events: pd.DataFrame, fits: pd.DataFrame) -> Path:
+    """event_term_structures.png (PLAN 6.2): for the 4 events with the largest term structure move, the ATM total
+    variance theta = w(0) of every accepted slice on the pre-event snapshot day against T, with E1 and E2 marked."""
+    plt = _plt()
+    top = events[events["ts_move"].notna()].sort_values("ts_move", ascending=False, kind="stable").head(4)
+    fig, axes = plt.subplots(1, 4, figsize=(17, 4.5), squeeze=False)
+    for ax, r in zip(axes.flat, top.itertuples(), strict=False):
+        f = fits[(fits["day"] == r.pre_snap_date) & (fits["ticker"] == r.ticker) & fits["status"].isin(ACCEPTED)]
+        f = f.sort_values("T")
+        theta = svi_w(0.0, f["a"], f["b"], f["rho"], f["m"], f["s"])
+        ax.plot(f["T"] * 365, theta, "o-", ms=3, color="C0", label="accepted slices")
+        for e, label in ((r.E1, "E1"), (r.E2, "E2")):
+            x = f[f["expiry"] == e]
+            ax.plot(x["T"] * 365, svi_w(0.0, x["a"], x["b"], x["rho"], x["m"], x["s"]), "o", ms=8, mfc="none",
+                    color="C3")
+            ax.annotate(label, (x["T"].iloc[0] * 365, float(svi_w(0.0, *x[PARAMS].iloc[0]))), xytext=(5, -10),
+                        textcoords="offset points", color="C3")
+        ax.set_xlim(0, min(f["T"].max() * 365, 120))
+        ax.set_ylim(0, float(theta[f["T"] * 365 <= 120].max()) * 1.1)
+        ax.set_title(f"{r.ticker} {r.timing} {r.event_date}, snapshot {r.pre_snap_date}\n"
+                     f"M_t {r.ts_move * 100:.2f}%, M_s {r.straddle_move * 100:.2f}%", fontsize=9)
+        ax.set_xlabel("days to expiry")
+        ax.grid(alpha=0.3)
+    for ax in list(axes.flat)[len(top):]:
+        ax.set_visible(False)
+    axes[0, 0].set_ylabel("ATM total variance theta = w(0)")
+    axes[0, 0].legend(fontsize=8)
+    fig.suptitle("Term structure before the event: the 4 largest term structure implied moves (first 120 days)")
+    fig.tight_layout()
+    return _save(fig, FIGURES / "event_term_structures.png")
+
+
+def stage_events(cfg) -> Path:
+    """PLAN 6.2 with instruction 06: events.csv (EVENTS) for every earnings and macro event, event_summary.csv
+    (kickoff 5.7, descriptive only below `[events] min_n`), and the 2 event figures."""
+    windows, fits, snapshot_days = event_inputs(cfg)
+    has_snap = [w.start in snapshot_days.get(w.ticker, set()) for w in windows.itertuples()]
+    need = windows[has_snap]
+    chains = pd.concat([_chain_inputs(date.fromisoformat(d), set(g["ticker"]), cfg)
+                        for d, g in need.groupby("start", sort=True)], ignore_index=True)
+    events = event_table(windows, chains, fits, _closes(), snapshot_days, cfg)
+    summary = event_summary(events, cfg)
+    TABLES.mkdir(parents=True, exist_ok=True)
+    events.to_csv(TABLES / "events.csv", **CSV)
+    summary.to_csv(TABLES / "event_summary.csv", **CSV)
+    print(windows.to_string())
+    print(events.to_string())
+    print(summary.to_string())
+    print(events["status"].value_counts().to_string())
+    print(f"no_pre_snapshot events: {int((events['status'] == 'no_pre_snapshot').sum())}")
+    fig_event_scatter(events)
+    fig_event_term_structures(events, fits)
+    return TABLES / "events.csv"
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
-          "tails": stage_tails}
+          "tails": stage_tails, "events": stage_events}
 
 
 def main(argv: list[str] | None = None) -> int:

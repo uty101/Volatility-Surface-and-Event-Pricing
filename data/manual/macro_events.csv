@@ -1,1 +1,7 @@
 date,kind,release_time_ny,source_url
+2026-10-28,FOMC,14:00,https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+2026-11-06,NFP,08:30,https://www.bls.gov/schedule/news_release/empsit.htm
+2026-11-10,CPI,08:30,https://www.bls.gov/schedule/news_release/cpi.htm
+2026-12-04,NFP,08:30,https://www.bls.gov/schedule/news_release/empsit.htm
+2026-12-09,FOMC,14:00,https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+2026-12-10,CPI,08:30,https://www.bls.gov/schedule/news_release/cpi.htm
