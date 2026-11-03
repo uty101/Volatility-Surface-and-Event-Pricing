@@ -68,8 +68,8 @@ def _cache_run(monkeypatch, tmp_path, cfg, days, force=False) -> int:
     """Instruction 07 step 7.0: the cache over `days`, each day's IV file the cut fixture table; `surface_day` returns
     the real fixture frames and counts its calls. Returns the number of days fitted; each day's frames must equal the
     fitted ones exactly, whether fitted or read."""
-    calls = []
-    monkeypatch.setattr(run_all, "surface_day", lambda iv, c: calls.append(c) or _tables())
+    calls, real = [], _tables()  # fitted before surface_day is replaced
+    monkeypatch.setattr(run_all, "surface_day", lambda iv, c: calls.append(c) or real)
     iv_dir = tmp_path / "iv"
     iv_dir.mkdir(exist_ok=True)
     for d in days:
