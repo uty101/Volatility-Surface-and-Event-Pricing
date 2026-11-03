@@ -3,7 +3,7 @@
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
 the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp and strategies stages, Section 9
-the attribution stage.
+the attribution stage, Section 10 the risk stage.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from volsurf.events import (
 from volsurf.forwards import clean_with_forwards
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
+from volsurf.risk import book_risk, day_surface, limit_breaches, select_book, shock_grid
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
 from volsurf.vrp import (
@@ -927,10 +928,42 @@ def stage_attribution(cfg) -> Path:
     return TABLES / "hedging_frequency.csv"
 
 
+def risk_inputs(day: date) -> tuple[pd.DataFrame, dict[str, dict]]:
+    """The day's IV table, and `day_surface` for each underlying with SSVI parameters that day, with each accepted
+    expiry's T from svi_fits.csv."""
+    iv = pd.read_parquet(PROCESSED / "iv" / f"{day}.parquet")
+    surface = pd.read_csv(TABLES / "surface_daily.csv", dtype={"day": str})
+    surface = surface[(surface["day"] == str(day)) & surface["ssvi_rho"].notna()]
+    theta = pd.read_csv(TABLES / "ssvi_theta.csv", dtype={"day": str, "expiry": str})
+    theta = theta[theta["day"] == str(day)].merge(read_fits()[["day", "ticker", "expiry", "T"]],
+                                                  on=["day", "ticker", "expiry"], how="left", validate="one_to_one")
+    return iv, {row["ticker"]: day_surface(row, theta[theta["ticker"] == row["ticker"]])
+                for _, row in surface.iterrows()}
+
+
+def stage_risk(cfg) -> Path:
+    """PLAN 10.1 with instruction 10, on the last captured day: risk_book.csv, risk_grid.csv, limit_breaches.csv."""
+    day = _days()[-1]
+    iv, surface = risk_inputs(day)
+    book = select_book(day, cfg.book.positions, iv, surface)
+    risk = book_risk(book, surface, cfg)
+    grid = shock_grid(book, surface, cfg)
+    breaches = limit_breaches(risk, cfg)
+    TABLES.mkdir(parents=True, exist_ok=True)
+    risk.to_csv(TABLES / "risk_book.csv", **CSV)
+    grid.to_csv(TABLES / "risk_grid.csv", **CSV)
+    breaches.to_csv(TABLES / "limit_breaches.csv", **CSV)
+    print(risk.to_string())
+    print(grid[grid["contract"] == "book"].pivot(index="spot_shock", columns="vol_shock_pts", values="pnl").to_string())
+    print(breaches.to_string())
+    return TABLES / "risk_grid.csv"
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
-          "vrp": stage_vrp, "strategies": stage_strategies, "attribution": stage_attribution}
+          "vrp": stage_vrp, "strategies": stage_strategies, "attribution": stage_attribution,
+          "risk": stage_risk}
 
 
 def main(argv: list[str] | None = None) -> int:
