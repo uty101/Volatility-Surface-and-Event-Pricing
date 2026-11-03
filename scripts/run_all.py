@@ -2,7 +2,7 @@
 
 Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
 Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
-the events stage, Section 7 the cor3m and live_corr stages.
+the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp stage.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
+from volsurf.vrp import vrp_monthly
 
 SNAPSHOTS = ROOT / "data" / "snapshots"
 PROCESSED = ROOT / "data" / "processed"
@@ -715,9 +716,37 @@ def stage_live_corr(cfg) -> Path:
     return TABLES / "implied_corr_live.csv"
 
 
+def _vix() -> pd.Series:
+    vix = pd.read_csv(RAW / "cboe" / "VIX.csv")
+    return pd.Series(vix["CLOSE"].to_numpy(), index=pd.to_datetime(vix["DATE"], format="%m/%d/%Y"))
+
+
+def stage_vrp(cfg) -> Path:
+    """PLAN 8.1 with instruction 08: vrp_monthly.csv (VRP_MONTHLY) at the completed month ends of `^GSPC` from
+    `[vrp] start`."""
+    index = pd.read_parquet(RAW / "prices" / "index.parquet")
+    start = time.perf_counter()
+    vm = vrp_monthly(_vix(), index["^GSPC"], cfg)
+    print(f"vrp_monthly: {len(vm)} month ends, {time.perf_counter() - start:.1f} s")
+    TABLES.mkdir(parents=True, exist_ok=True)
+    out = TABLES / "vrp_monthly.csv"
+    vm.to_csv(out, **CSV)
+    print(vm.head(5).to_string())
+    print(vm.tail(5).to_string())
+    g = vm.dropna(subset=["garch_fc"])
+    print(g.head(5).to_string())
+    both, sig = vm.dropna(subset=["iv", "rv_fwd_21"]), vm["signal"].dropna()
+    with_fc = both.dropna(subset=["garch_fc"])
+    print(f"mean vrp: {both['vrp'].mean()!r} over {len(both)} rows with IV and RV; {with_fc['vrp'].mean()!r} over "
+          f"{len(with_fc)} rows that also have a GARCH forecast; signal > 0 in {int((sig > 0).sum())} of {len(sig)} "
+          f"months ({(sig > 0).mean()!r})")
+    return out
+
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
-          "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr}
+          "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
+          "vrp": stage_vrp}
 
 
 def main(argv: list[str] | None = None) -> int:
