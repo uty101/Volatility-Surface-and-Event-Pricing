@@ -1,9 +1,10 @@
 """Event pricing (PLAN 6.1 and 6.2, kickoff Section 5.7, Convention 4.11, instruction 06).
 
 An event's window runs close to close: BMO on D from close(previous session) to close(D), AMC on D from close(D) to
-close(next session), and a macro event on D (`^SPX`) as BMO. The pre-event snapshot is the snapshot on the window's
-start session. The implied move comes from that snapshot's chain (straddle, O-11 (a)) and its accepted SVI slices
-(term structure); the realised move from unadjusted closes.
+close(next session), and a macro event on D (`^SPX`) as BMO. The pre-event snapshot is the last snapshot no later
+than the window's start session (Convention 4.11, instruction 07 status 4). The implied move comes from that
+snapshot's chain (straddle, O-11 (a)) and its accepted SVI slices (term structure); the realised move from unadjusted
+closes.
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ from volsurf.data import sessions_between
 from volsurf.snapshots import NY, _xnys
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
 
-EVENTS_COLUMNS = ["ticker", "group", "event_date", "timing", "pre_snap_date", "E1", "E2", "n1", "n2", "theta1",
-                  "theta2", "S", "F", "straddle_move", "ts_move", "realised_move", "ratio", "log_ratio", "status"]
+EVENTS_COLUMNS = ["ticker", "group", "event_date", "timing", "pre_snap_date", "pre_snap_age", "E1", "E2", "n1", "n2",
+                  "theta1", "theta2", "S", "F", "straddle_move", "ts_move", "realised_move", "ratio", "log_ratio",
+                  "status"]  # instruction 07 step 7.0: pre_snap_age after pre_snap_date
 WINDOW_COLUMNS = ["ticker", "event_date", "timing", "event_ts_ny", "snap_date", "override", "start", "end"]
 SUMMARY_COLUMNS = ["scope", "n", "mean_log_ratio", "median_log_ratio", "mean_lo", "mean_hi", "share_above",
                    "share_lo", "share_hi", "status"]
@@ -126,6 +128,14 @@ def _theta(r) -> float:
     return float(svi_w(0.0, *(getattr(r, p) for p in PARAMS)))
 
 
+def pre_event_snapshot(start: str, days: set[str]) -> str | None:
+    """Convention 4.11 with instruction 07 status 4: the last snapshot day on a session strictly before the window's
+    end close and no later than the window's start session, i.e. the latest of `days` on or before `start`; None if
+    there is none. It does not have to fall on the start session."""
+    before = [d for d in days if d <= start]
+    return max(before) if before else None
+
+
 def event_table(windows: pd.DataFrame, iv: pd.DataFrame, svi_fits: pd.DataFrame, closes: dict[str, pd.Series],
                 snapshot_days: dict[str, set[str]], cfg) -> pd.DataFrame:
     """EVENTS (kickoff 5.7, Convention 4.11), one row per window in `windows` (WINDOW_COLUMNS).
@@ -133,14 +143,17 @@ def event_table(windows: pd.DataFrame, iv: pd.DataFrame, svi_fits: pd.DataFrame,
     - `iv`: clean chain rows with the IV stage inputs (day, ticker, expiry, kind, strike, S, F, mid), both sides, for
       the pre-event snapshot days; `svi_fits`: SVI_FITS rows of every day (parameters at full precision, O-39 (a));
       `closes`: ticker -> unadjusted closes by ISO date; `snapshot_days`: ticker -> ISO days with that ticker captured.
-    - Pre-event snapshot t: the snapshot on the window's start session. E1 < E2: the first 2 accepted expiries on t
-      with expiry on or after the window's end session; theta_i = SVI w_i(0); n_i = sessions_between(t, E_i).
-      S and F (of E1) and the straddle mids come from `iv`. realised_move = |ln(close(end) / close(start))|,
-      ratio = realised / ts_move, log_ratio = ln(ratio).
+    - Pre-event snapshot t: the last snapshot day of the ticker no later than the window's start session
+      (`pre_event_snapshot`); pre_snap_age = sessions_between(t, start), 0 when t is the start session. E1 < E2: the
+      first 2 accepted expiries on t with expiry on or after the window's end session; theta_i = SVI w_i(0);
+      n_i = sessions_between(t, E_i). S and F (of E1) and the straddle mids come from `iv`.
+      realised_move = |ln(close(end) / close(start))|, ratio = realised / ts_move, log_ratio = ln(ratio).
 
     Status (blank results where they cannot be computed, Convention 4.15): `unknown` (timing unknown, excluded until
-    an override sets it); with no snapshot on the start session, `pending` if the start session is after the ticker's
-    last close, else `no_pre_snapshot`; `too_few_expiries` with fewer than 2 accepted expiries; otherwise `ok` or the
+    an override sets it); `pending` if the start session is after the ticker's last close and has no snapshot of its
+    own (a later snapshot may still come before it); else `no_pre_snapshot` if no snapshot day is on or before the
+    start session;
+    `too_few_expiries` with fewer than 2 accepted expiries; otherwise `ok` or the
     distinct conditions joined with `|` in this order: `no_event_premium`, `no_straddle`, `pending` (window ends after
     the last close, so realised is blank)."""
     rows = []
@@ -153,11 +166,12 @@ def event_table(windows: pd.DataFrame, iv: pd.DataFrame, svi_fits: pd.DataFrame,
         if w.timing == "unknown":
             rows.append(row | {"status": "unknown"})
             continue
-        if w.start not in snapshot_days.get(w.ticker, set()):
+        t = pre_event_snapshot(w.start, snapshot_days.get(w.ticker, set()))
+        if (w.start > last and t != w.start) or t is None:
             rows.append(row | {"status": "pending" if w.start > last else "no_pre_snapshot"})
             continue
-        t = w.start
         row["pre_snap_date"] = t
+        row["pre_snap_age"] = sessions_between(date.fromisoformat(t), date.fromisoformat(w.start))
         acc = fits[(fits["day"] == t) & (fits["ticker"] == w.ticker) & (fits["expiry"] >= w.end)]
         acc = acc.sort_values("expiry").head(2)
         if len(acc) < 2:

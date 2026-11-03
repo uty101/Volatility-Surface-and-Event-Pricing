@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import date
 from functools import cache
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from scripts import run_all
 from scripts.run_all import SURFACE_FILES, surface_tables, write_surface_tables
 from volsurf.config import load_config
 from volsurf.data import RATE_TENORS
@@ -60,6 +62,51 @@ def test_surface_run_fixture():
     assert (surface.loc[ok, "ssvi_eta"] * (1 + surface.loc[ok, "ssvi_rho"].abs()) <= 2).all()
     assert np.array_equal(surface["n_expiries"], fits[accepted].groupby("ticker", sort=False).size()
                           .reindex(surface["ticker"]).fillna(0).to_numpy())
+
+
+def _cache_run(monkeypatch, tmp_path, cfg, days, force=False) -> int:
+    """Instruction 07 step 7.0: the cache over `days`, each day's IV file the cut fixture table; `surface_day` returns
+    the real fixture frames and counts its calls. Returns the number of days fitted; each day's frames must equal the
+    fitted ones exactly, whether fitted or read."""
+    calls = []
+    monkeypatch.setattr(run_all, "surface_day", lambda iv, c: calls.append(c) or _tables())
+    iv_dir = tmp_path / "iv"
+    iv_dir.mkdir(exist_ok=True)
+    for d in days:
+        if not (iv_dir / f"{d}.parquet").exists():
+            _fixture_iv().to_parquet(iv_dir / f"{d}.parquet", index=False)
+    fitted = 0
+    for d in days:
+        tables, refit = run_all.cached_surface_day(d, cfg, iv_dir=iv_dir, cache_dir=tmp_path / "surface", force=force)
+        fitted += refit
+        for name, frame in _tables().items():
+            assert tables[name].equals(frame) and list(tables[name].dtypes) == list(frame.dtypes), (d, name)
+    assert len(calls) == fitted
+    return fitted
+
+
+DAYS = [date(2026, 10, 28), date(2026, 10, 29), date(2026, 10, 30)]
+
+
+def test_cache_second_run_refits_nothing(monkeypatch, tmp_path):
+    assert _cache_run(monkeypatch, tmp_path, CFG, DAYS) == 3
+    assert sorted(p.name for p in (tmp_path / "surface").iterdir()) == [f"{d}.parquet" for d in DAYS]
+    assert _cache_run(monkeypatch, tmp_path, CFG, DAYS) == 0  # nothing changed: 0 days refitted
+    assert _cache_run(monkeypatch, tmp_path, CFG, DAYS, force=True) == 3  # --force refits everything
+    assert _cache_run(monkeypatch, tmp_path, CFG, [*DAYS, date(2026, 11, 3)]) == 1  # only the new day
+
+
+def test_cache_svi_edit_refits_all_days(monkeypatch, tmp_path):
+    assert _cache_run(monkeypatch, tmp_path, CFG, DAYS) == 3
+    edited = dataclasses.replace(CFG, svi=dataclasses.replace(CFG.svi, max_rmse_volpts=CFG.svi.max_rmse_volpts + 1))
+    assert _cache_run(monkeypatch, tmp_path, edited, DAYS) == 3  # an edited [svi] table refits every day
+    assert _cache_run(monkeypatch, tmp_path, edited, DAYS) == 0
+    surface = dataclasses.replace(CFG, surface=dataclasses.replace(CFG.surface, delta=0.2))
+    assert _cache_run(monkeypatch, tmp_path, surface, DAYS) == 3
+    (tmp_path / "iv" / f"{DAYS[1]}.parquet").write_bytes(
+        (tmp_path / "iv" / f"{DAYS[1]}.parquet").read_bytes() + b"\0")  # one day's IV file changes
+    assert run_all.surface_key(tmp_path / "iv" / f"{DAYS[1]}.parquet", surface) != run_all.surface_key(
+        tmp_path / "iv" / f"{DAYS[0]}.parquet", surface)
 
 
 def test_run_twice_byte_identical(tmp_path):

@@ -8,7 +8,12 @@ the events stage.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import hashlib
+import io
+import json
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +22,8 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from volsurf.config import load_config
 from volsurf.data import RATE_TENORS, SPX, capture_health, clean_chain, load_snapshot
@@ -30,7 +37,13 @@ from volsurf.density import (
     svi_density,
     tail_probs,
 )
-from volsurf.events import event_summary, event_table, event_windows, macro_windows
+from volsurf.events import (
+    event_summary,
+    event_table,
+    event_windows,
+    macro_windows,
+    pre_event_snapshot,
+)
 from volsurf.forwards import clean_with_forwards
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
@@ -145,8 +158,59 @@ def _days() -> list[date]:
 
 def surface_tables(ivs: list[pd.DataFrame], cfg) -> dict[str, pd.DataFrame]:
     """PLAN 4.3: `surface_day` on each day's IV table, concatenated in day order."""
-    parts = [surface_day(iv, cfg) for iv in ivs]
+    return concat_surface([surface_day(iv, cfg) for iv in ivs])
+
+
+def concat_surface(parts: list[dict[str, pd.DataFrame]]) -> dict[str, pd.DataFrame]:
     return {name: pd.concat([p[name] for p in parts], ignore_index=True) for name in parts[0]}
+
+
+def surface_key(iv_path: Path, cfg) -> str:
+    """Instruction 07 step 7.0: sha256 over volsurf/svi.py, volsurf/ssvi.py, the [svi] and [surface] config tables
+    and the day's IV file (the sha256 of each part, concatenated, hashed again)."""
+    tables = [json.dumps(dataclasses.asdict(t), sort_keys=True).encode() for t in (cfg.svi, cfg.surface)]
+    parts = [(ROOT / "volsurf" / "svi.py").read_bytes(), (ROOT / "volsurf" / "ssvi.py").read_bytes(), *tables,
+             iv_path.read_bytes()]
+    return hashlib.sha256(b"".join(hashlib.sha256(p).digest() for p in parts)).hexdigest()
+
+
+def _write_cache(tables: dict[str, pd.DataFrame], key: str, path: Path) -> None:
+    """One day's `surface_day` frames in one parquet file, each frame stored as its own parquet bytes so that dtypes
+    and values come back exactly; the key in the file's metadata."""
+    blobs = []
+    for frame in tables.values():
+        buf = io.BytesIO()
+        frame.to_parquet(buf, index=False)
+        blobs.append(buf.getvalue())
+    table = pa.table({"name": list(tables), "data": pa.array(blobs, pa.binary())}).replace_schema_metadata(
+        {"key": key})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, path)
+
+
+def _read_cache(path: Path, key: str) -> dict[str, pd.DataFrame] | None:
+    """The cached frames if `path` exists and carries `key`, else None."""
+    if not path.exists():
+        return None
+    table = pq.read_table(path)
+    if (table.schema.metadata or {}).get(b"key", b"").decode() != key:
+        return None
+    return {n: pd.read_parquet(io.BytesIO(b)) for n, b in zip(table["name"].to_pylist(), table["data"].to_pylist(),
+                                                               strict=True)}
+
+
+def cached_surface_day(day: date, cfg, iv_dir: Path = PROCESSED / "iv", cache_dir: Path = PROCESSED / "surface",
+                       force: bool = False) -> tuple[dict[str, pd.DataFrame], bool]:
+    """Instruction 07 step 7.0: `surface_day` for one day through data/processed/surface/{day}.parquet. A cache file
+    whose key (`surface_key`) matches is read, not refitted; `force` refits. Returns the frames and whether the day
+    was fitted."""
+    iv_path = iv_dir / f"{day.isoformat()}.parquet"
+    key, path = surface_key(iv_path, cfg), cache_dir / f"{day.isoformat()}.parquet"
+    if not force and (tables := _read_cache(path, key)) is not None:
+        return tables, False
+    tables = surface_day(pd.read_parquet(iv_path), cfg)
+    _write_cache(tables, key, path)
+    return tables, True
 
 
 SURFACE_FILES = {"svi_fits": "svi_fits.csv", "surface": "surface_daily.csv", "calendar": "calendar_violations.csv",
@@ -284,12 +348,21 @@ def fig_metrics(surface: pd.DataFrame) -> Path:
     return _save(fig, FIGURES / "spx_metrics.png")
 
 
-def stage_surface(cfg) -> Path:
+def stage_surface(cfg, force: bool = False) -> Path:
     """Instruction 04 step 4.3: SVI and SSVI on the fixture day and every downloaded snapshot day, from the iv
-    stage's data/processed/iv/{day}.parquet; the 4 surface tables and the Section 4 figures."""
+    stage's data/processed/iv/{day}.parquet, each day through the cache of instruction 07 step 7.0
+    (`cached_surface_day`; `force` refits every day); the 4 surface tables and the Section 4 figures."""
     days = _days()
-    ivs = [pd.read_parquet(PROCESSED / "iv" / f"{d.isoformat()}.parquet") for d in days]
-    tables = surface_tables(ivs, cfg)
+    start = time.perf_counter()
+    parts, fitted = [], []
+    for d in days:
+        tables, refit = cached_surface_day(d, cfg, force=force)
+        parts.append(tables)
+        print(f"{d}: {'fitted' if refit else 'read from cache'}")
+        fitted += [d] if refit else []
+    tables = concat_surface(parts)
+    print(f"surface: {len(fitted)} of {len(days)} days fitted, {time.perf_counter() - start:.1f} s")
+    ivs = [pd.read_parquet(PROCESSED / "iv" / f"{FIXTURE_DAY.isoformat()}.parquet")]
     paths = write_surface_tables(tables, TABLES)
     fits, surface = tables["svi_fits"], tables["surface"]
     print(pd.crosstab([fits["day"], fits["ticker"]], fits["status"]).to_string())
@@ -553,10 +626,11 @@ def stage_events(cfg) -> Path:
     """PLAN 6.2 with instruction 06: events.csv (EVENTS) for every earnings and macro event, event_summary.csv
     (kickoff 5.7, descriptive only below `[events] min_n`), and the 2 event figures."""
     windows, fits, snapshot_days = event_inputs(cfg)
-    has_snap = [w.start in snapshot_days.get(w.ticker, set()) for w in windows.itertuples()]
-    need = windows[has_snap]
+    pre = [pre_event_snapshot(w.start, snapshot_days.get(w.ticker, set())) if isinstance(w.start, str) else None
+           for w in windows.itertuples()]
+    need = windows.assign(pre=pre).dropna(subset=["pre"])
     chains = pd.concat([_chain_inputs(date.fromisoformat(d), set(g["ticker"]), cfg)
-                        for d, g in need.groupby("start", sort=True)], ignore_index=True)
+                        for d, g in need.groupby("pre", sort=True)], ignore_index=True)
     events = event_table(windows, chains, fits, _closes(), snapshot_days, cfg)
     summary = event_summary(events, cfg)
     TABLES.mkdir(parents=True, exist_ok=True)
@@ -572,6 +646,7 @@ def stage_events(cfg) -> Path:
     return TABLES / "events.csv"
 
 
+
 STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events}
@@ -580,10 +655,12 @@ STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--stage", choices=[*STAGES, "all"], required=True)
+    p.add_argument("--force", action="store_true", help="surface stage: refit every day, ignoring the cache")
     args = p.parse_args(argv)
     cfg = load_config()
     for name in STAGES if args.stage == "all" else [args.stage]:
-        print(f"{name}: wrote {STAGES[name](cfg)}")
+        kwargs = {"force": args.force} if name == "surface" else {}
+        print(f"{name}: wrote {STAGES[name](cfg, **kwargs)}")
     return 0
 
 

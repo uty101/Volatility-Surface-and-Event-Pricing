@@ -27,7 +27,7 @@
       }
     },
     "prices": {
-      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "pulled_utc": "2026-11-03T17:43:14.473911+00:00",
       "versions": {
         "python": "3.12.13",
         "yfinance": "1.7.0",
@@ -166,7 +166,7 @@
     "prices/close.parquet": {
       "stage": "prices",
       "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "pulled_utc": "2026-11-03T17:43:14.473911+00:00",
       "rows": 9297,
       "first_date": "1989-12-01",
       "last_date": "2026-11-02",
@@ -175,7 +175,7 @@
     "prices/dividends.csv": {
       "stage": "prices",
       "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "pulled_utc": "2026-11-03T17:43:14.473911+00:00",
       "rows": 2479,
       "first_date": "1989-12-05",
       "last_date": "2026-10-14",
@@ -184,7 +184,7 @@
     "prices/index.parquet": {
       "stage": "prices",
       "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "pulled_utc": "2026-11-03T17:43:14.473911+00:00",
       "rows": 9297,
       "first_date": "1989-12-01",
       "last_date": "2026-11-02",
@@ -193,11 +193,11 @@
     "prices/sectors.parquet": {
       "stage": "prices",
       "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T10:58:44.665092+00:00",
+      "pulled_utc": "2026-11-03T17:43:14.473911+00:00",
       "rows": 7008,
       "first_date": "1998-12-22",
       "last_date": "2026-11-02",
-      "sha256": "a533efbfb6bcc2ed97ade320ed208b7f05b3b658be6bfe7b93662814a9a9325f"
+      "sha256": "74d494e005e444750dbeac97870d29670b50eff69910ff7c68a903b7ce120bb5"
     },
     "ssga/xlk_holdings_2026-10-28.csv": {
       "stage": "ssga",

@@ -163,6 +163,28 @@ def test_missing_pre_snapshot_excluded_and_counted():
     assert event_summary(ev, CFG).loc[0, "n"] == 1  # only the ok event enters the summary
 
 
+def test_last_snapshot_before_start_session():
+    # instruction 07 step 7.0: AMC on Monday 2026-11-02 (window close(11-02) to close(11-03)), snapshots on 10-29 and
+    # 10-30 only: the pre-event snapshot is 10-30, 1 session before the start session, and n_i count from 10-30
+    windows = event_windows(_earnings(("2026-10-30", "PLTR", "2026-11-02 16:05:00-05:00", "AMC")), NO_OVERRIDES)
+    fits = pd.concat([_fits(d, "PLTR", [("2026-11-06", 0.006, "ok"), ("2026-11-13", 0.009, "ok")])
+                      for d in ("2026-10-29", "2026-10-30")], ignore_index=True)
+    iv = _chain("2026-10-30", "PLTR", "2026-11-06", 100.0, 100.1, {100.0: (2.0, 1.9)})
+    closes = {"PLTR": pd.Series({"2026-10-30": 99.0, "2026-11-02": 100.0, "2026-11-03": 92.0})}
+    ev = event_table(windows, iv, fits, closes, {"PLTR": {"2026-10-29", "2026-10-30"}}, CFG)
+    print(ev.to_string())
+    r = ev.iloc[0]
+    assert (r["pre_snap_date"], r["pre_snap_age"]) == ("2026-10-30", 1)
+    assert (r["E1"], r["E2"], r["n1"], r["n2"]) == ("2026-11-06", "2026-11-13", 5, 10)
+    assert r["straddle_move"] == pytest.approx(3.9 / 100.0, abs=1e-15)
+    assert r["realised_move"] == pytest.approx(abs(math.log(92.0 / 100.0)), abs=1e-15)
+    assert r["status"] == "ok"
+    fits = fits[fits["day"] == "2026-10-30"]
+    on_start = event_table(windows, iv.assign(day="2026-11-02"), fits.assign(day="2026-11-02"), closes,
+                           {"PLTR": {"2026-10-30", "2026-11-02"}}, CFG)
+    assert (on_start.loc[0, "pre_snap_date"], on_start.loc[0, "pre_snap_age"]) == ("2026-11-02", 0)
+
+
 def test_pending_after_last_close():
     windows, iv, fits, closes, days = _case()
     closes = {"AAPL": closes["AAPL"].loc[:"2026-10-29"]}
@@ -176,9 +198,9 @@ def test_events_schema():
     windows, iv, fits, closes, days = _case()
     ev = event_table(windows, iv, fits, closes, days, CFG)
     assert list(ev.columns) == EVENTS_COLUMNS
-    assert EVENTS_COLUMNS == ["ticker", "group", "event_date", "timing", "pre_snap_date", "E1", "E2", "n1", "n2",
-                              "theta1", "theta2", "S", "F", "straddle_move", "ts_move", "realised_move", "ratio",
-                              "log_ratio", "status"]  # CLAUDE.md Section 6.2 EVENTS
+    assert EVENTS_COLUMNS == ["ticker", "group", "event_date", "timing", "pre_snap_date", "pre_snap_age", "E1", "E2",
+                              "n1", "n2", "theta1", "theta2", "S", "F", "straddle_move", "ts_move", "realised_move",
+                              "ratio", "log_ratio", "status"]  # CLAUDE.md Section 6.2 EVENTS, instruction 07 step 7.0
 
 
 def test_summary_blank_below_min_n():
