@@ -51,7 +51,7 @@ from volsurf.forwards import clean_with_forwards
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
 from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
 from volsurf.report import build_risk_report
-from volsurf.risk import book_risk, day_surface, limit_breaches, select_book, shock_grid
+from volsurf.risk import VOL_POINT, book_risk, day_surface, limit_breaches, select_book, shock_grid
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
 from volsurf.vrp import (
@@ -932,14 +932,17 @@ def stage_attribution(cfg) -> Path:
 
 def risk_inputs(day: date) -> tuple[pd.DataFrame, dict[str, dict]]:
     """The day's IV table, and `day_surface` for each underlying with SSVI parameters that day, with each accepted
-    expiry's T from svi_fits.csv."""
+    expiry's T and SVI parameters from svi_fits.csv."""
     iv = pd.read_parquet(PROCESSED / "iv" / f"{day}.parquet")
     surface = pd.read_csv(TABLES / "surface_daily.csv", dtype={"day": str})
     surface = surface[(surface["day"] == str(day)) & surface["ssvi_rho"].notna()]
     theta = pd.read_csv(TABLES / "ssvi_theta.csv", dtype={"day": str, "expiry": str})
-    theta = theta[theta["day"] == str(day)].merge(read_fits()[["day", "ticker", "expiry", "T"]],
+    fits = read_fits()
+    theta = theta[theta["day"] == str(day)].merge(fits[["day", "ticker", "expiry", "T"]],
                                                   on=["day", "ticker", "expiry"], how="left", validate="one_to_one")
-    return iv, {row["ticker"]: day_surface(row, theta[theta["ticker"] == row["ticker"]])
+    acc = fits[(fits["day"] == str(day)) & fits["status"].isin(ACCEPTED)]
+    slices = {t: {r["expiry"]: tuple(r[PARAMS]) for _, r in g.iterrows()} for t, g in acc.groupby("ticker")}
+    return iv, {row["ticker"]: day_surface(row, theta[theta["ticker"] == row["ticker"]], slices.get(row["ticker"]))
                 for _, row in surface.iterrows()}
 
 
@@ -956,6 +959,11 @@ def stage_risk(cfg) -> Path:
     grid.to_csv(TABLES / "risk_grid.csv", **CSV)
     breaches.to_csv(TABLES / "limit_breaches.csv", **CSV)
     print(risk.to_string())
+    quote = iv.assign(expiry=iv["expiry"].astype(str))[["ticker", "expiry", "kind", "strike", "mid", "iv"]]
+    vs = risk.merge(quote, left_on=["underlying", "expiry", "kind", "strike"],
+                    right_on=["ticker", "expiry", "kind", "strike"], how="left", validate="one_to_one")
+    vs = vs.assign(gap_pts=(vs["vol"] - vs["iv"]) * VOL_POINT)
+    print(vs[["contract", "days", "select_delta", "vol_source", "vol", "iv", "gap_pts", "mid", "price"]].to_string())
     print(grid[grid["contract"] == "book"].pivot(index="spot_shock", columns="vol_shock_pts", values="pnl").to_string())
     print(breaches.to_string())
     return TABLES / "risk_grid.csv"

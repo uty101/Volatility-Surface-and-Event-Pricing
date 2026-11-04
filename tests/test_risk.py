@@ -18,6 +18,8 @@ from volsurf.risk import (
     NO_SURFACE,
     OK,
     RISK_COLUMNS,
+    SSVI,
+    SVI,
     black76_greeks,
     book_risk,
     contract_vol,
@@ -27,8 +29,10 @@ from volsurf.risk import (
     position_value,
     select_book,
     shock_grid,
+    vol_source,
 )
 from volsurf.ssvi import ssvi_w
+from volsurf.svi import svi_w
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = load_config(ROOT / "config.toml")
@@ -36,11 +40,12 @@ DAY = date(2026, 11, 3)
 SPX_INPUTS = {"S": 7700.0, "r": 0.037, "q": 0.012}
 AAPL_INPUTS = {"S": 270.0, "r": 0.037, "q": 0.004}
 THETAS = pd.DataFrame({"T": [0.01, 0.5], "theta_used": [0.0004, 0.02]})
+SLICE = (0.002, 0.05, -0.6, 0.01, 0.08)  # a, b, rho, m, s
 
 
-def _surface(*tickers):
+def _surface(*tickers, slices=None):
     row = pd.Series({"ssvi_rho": -0.5, "ssvi_eta": 1.0, "ssvi_gamma": 0.45})
-    return {t: day_surface(row, THETAS) for t in tickers}
+    return {t: day_surface(row, THETAS, slices) for t in tickers}
 
 
 def _iv(ticker, inputs, expiries, kind, strikes):
@@ -104,6 +109,43 @@ def test_vol_is_the_ssvi_vol_at_the_strike():
         float(np.sqrt(w / pos["T"])), rel=1e-14)
 
 
+def test_vol_is_the_expiry_svi_slice_at_the_strike():
+    pos = SPX_BOOK.iloc[0]
+    s = _surface("^SPX", slices={"2026-12-03": SLICE})["^SPX"]
+    want = np.sqrt(svi_w(np.log(pos["strike"] / pos["F"]), *SLICE) / pos["T"])
+    assert contract_vol(pos["strike"], pos["F"], pos["T"], s, "2026-12-03") == pytest.approx(float(want), rel=1e-14)
+    assert vol_source(s, "2026-12-03") == SVI
+
+
+def test_ssvi_is_the_fallback_when_the_expiry_has_no_slice():
+    pos = SPX_BOOK.iloc[0]
+    s = _surface("^SPX", slices={"2026-12-18": SLICE})["^SPX"]  # another expiry's slice is not used
+    want = contract_vol(pos["strike"], pos["F"], pos["T"], _surface("^SPX")["^SPX"])
+    assert contract_vol(pos["strike"], pos["F"], pos["T"], s, "2026-12-03") == want
+    assert vol_source(s, "2026-12-03") == SSVI
+
+
+def test_vol_source_column():
+    surface = _surface("^SPX", slices={"2026-12-03": SLICE})
+    assert book_risk(select_book(DAY, [_position()], SPX_CHAIN, surface), surface, CFG)["vol_source"].iloc[0] == SVI
+    assert book_risk(SPX_BOOK, _surface("^SPX"), CFG)["vol_source"].iloc[0] == SSVI
+
+
+def test_selection_and_shocks_run_on_the_slice_vol():
+    surface = _surface("^SPX", slices={"2026-12-03": SLICE})
+    book = select_book(DAY, [_position()], SPX_CHAIN, surface)
+    pos = book.iloc[0]
+    s = surface["^SPX"]
+    strikes = np.sort(SPX_CHAIN["strike"].unique())
+    vols = np.array([contract_vol(K, pos["F"], pos["T"], s, "2026-12-03") for K in strikes])
+    deltas = greeks(pos["S"], strikes, pos["T"], pos["r"], pos["q"], vols, "P")["delta"]
+    assert pos["strike"] == strikes[np.argmin(np.abs(deltas + 0.25))]
+    vol = contract_vol(pos["strike"], pos["F"], pos["T"], s, "2026-12-03")
+    grid = shock_grid(book, surface, _shocks((-0.05,), (2.5,)))
+    want = (position_value(pos, -0.05, vol + 0.025, CFG) - position_value(pos, 0.0, vol, CFG)) * 100 * 10 * -1
+    assert grid["pnl"].iloc[0] == pytest.approx(want, rel=1e-12)
+
+
 @pytest.mark.parametrize("name", ["^SPX", "AAPL"])
 def test_zero_shock_zero_pnl(name):
     grid = shock_grid(BOOKS[name], _surface(name), CFG)
@@ -155,14 +197,18 @@ def test_vol_shock_floored_at_iv_lo():
 
 @pytest.mark.parametrize("name", ["^SPX", "AAPL"])
 def test_small_shock_matches_delta_measure(name):
-    # MEASURE (PLAN 10.1): printed for the reviewer, asserts only that it is finite (rule 5)
+    # Instruction 11 part A status 4: the ^SPX positions are bound at 0.5% of delta x dS. The tree positions are
+    # report-only: the tree's value is piecewise linear in S between terminal nodes, so its P&L over a small shock is
+    # the slope of 1 segment and does not converge to the node delta as the shock shrinks
     h = CFG.tolerances.fd_h_spot_rel
     risk = book_risk(BOOKS[name], _surface(name), CFG).iloc[0]
     pnl = shock_grid(BOOKS[name], _surface(name), _shocks((h,)))["pnl"].iloc[0]
     want = risk["dollar_delta"] * h
     gap = abs(pnl - want) / abs(want)
-    print(f"MEASURE {name} shock {h:g}: P&L {pnl:.6f}, delta x dS {want:.6f}, relative gap {gap:.6g}")
+    print(f"{name} shock {h:g}: P&L {pnl:.6f}, delta x dS {want:.6f}, relative gap {gap:.6g}")
     assert np.isfinite(gap)
+    if name == "^SPX":
+        assert gap <= 0.005
 
 
 def test_black76_greeks_match_bsm():
