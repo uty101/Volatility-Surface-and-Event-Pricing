@@ -1,9 +1,10 @@
-"""Rebuild entry point (O-1 (a)): each step's driver is a stage, run with --stage <name>.
+"""Rebuild entry point (O-1 (a)): each step's driver is a stage, run with --stage <name>; with no --stage every stage
+runs in section order, from data/raw/, data/manual/ and the `snapshots` release (PLAN 11.1).
 
-Section 11.1 completes this script; Section 1 adds the capture_health stage, Section 2 the eep stage and
-Section 3 the clean_log and iv stages, Section 4 the surface stage, Section 5 the density and tails stages, Section 6
-the events stage, Section 7 the cor3m and live_corr stages, Section 8 the vrp and strategies stages, Section 9
-the attribution stage, Section 10 the risk and report stages.
+Section 1 adds the capture_health stage, Section 2 the eep stage and Section 3 the clean_log and iv stages, Section 4
+the surface stage, Section 5 the density and tails stages, Section 6 the events stage, Section 7 the cor3m and
+live_corr stages, Section 8 the vrp and strategies stages, Section 9 the attribution stage, Section 10 the risk and
+report stages, Section 11 the snapshots, pricer_check, iv_tree, answers and readme stages.
 """
 
 from __future__ import annotations
@@ -13,9 +14,12 @@ import dataclasses
 import hashlib
 import io
 import json
+import re
+import subprocess
 import sys
 import time
 from datetime import date
+from itertools import product
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +29,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import QuantLib as ql
 
 from volsurf.attribution import attribute_live, bs_path_attribution, simulate_hedging
 from volsurf.config import load_config
@@ -48,10 +53,18 @@ from volsurf.events import (
     pre_event_snapshot,
 )
 from volsurf.forwards import clean_with_forwards
+from volsurf.greeks import greeks
 from volsurf.iv import iv_chain, iv_inputs, iv_summary
-from volsurf.pricing import K_BIN_LABELS, eep_rows, eep_summary
+from volsurf.pricing import K_BIN_LABELS, black76, bsm, crr, eep_rows, eep_summary
 from volsurf.report import build_risk_report
-from volsurf.risk import VOL_POINT, book_risk, day_surface, limit_breaches, select_book, shock_grid
+from volsurf.risk import (
+    VOL_POINT,
+    book_risk,
+    day_surface,
+    limit_breaches,
+    select_book,
+    shock_grid,
+)
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
 from volsurf.vrp import (
@@ -75,10 +88,27 @@ FIXTURES = ROOT / "tests" / "fixtures"
 TABLES = ROOT / "outputs" / "tables"
 FIGURES = ROOT / "outputs" / "figures"
 REPORTS = ROOT / "outputs" / "reports"
+GREEK_NAMES = ("delta", "gamma", "vega", "theta", "rho")  # the Greeks checked against QuantLib, kickoff Section 8 item 2.2
 CAPTURE_START = date(2026, 10, 28)  # kickoff Section 3.3: capture window starts 2026-10-28
 FIXTURE_DAY = date(2026, 10, 28)  # instruction 01d part B: the fixture day
 CSV = {"index": False, "float_format": "%.10g", "lineterminator": "\n", "encoding": "utf-8"}
 FULL = "%.17g"  # O-39 (a), instruction 06: SVI parameters in svi_fits.csv at full precision
+GRID_SPOT, GRID_R, GRID_Q = 100.0, 0.045, 0.015  # the 2.1 grid, instruction 02 Section B
+GRID = list(product("CP", range(70, 131, 10), (7, 30, 91, 182, 365, 730), (0.15, 0.30, 0.60)))
+GREEK_BOUND = 1e-8  # against QuantLib, kickoff Section 8 item 2.2
+BLACK76_BOUND = 1e-12  # kickoff Section 8 item 2.1
+
+
+def stage_snapshots(cfg) -> Path:
+    """Instruction 11 step 11.1: every asset of the `snapshots` release into data/snapshots/, so that the days are
+    every capture day in the release when the script runs. Prints the day count."""
+    from scripts.pull_snapshots import pull
+
+    out = RAW / "snapshot_manifest.csv"
+    print(pull(cfg.snapshot.release_tag, SNAPSHOTS, out))
+    days = _days()
+    print(f"capture days: {len(days)}, {days[0]} to {days[-1]} (the fixture day and {len(days) - 1} in the release)")
+    return out
 
 
 def stage_capture_health(cfg) -> Path:
@@ -130,6 +160,70 @@ def stage_eep(cfg) -> Path:
     print(summary[(summary["ticker"] == "AAPL") & (summary["kind"] == "C")
                   & summary["k_bin"].isin(K_BIN_LABELS[-2:])].to_string())
     return out
+
+
+def _ql_option(K: float, days: int, sigma: float, kind: str, steps: int | None = None) -> ql.VanillaOption:
+    """QuantLib vanilla option per instruction 02 Section B: dates today + days, Actual365Fixed, flat continuous r and
+    q. AnalyticEuropeanEngine, or BinomialVanillaEngine("crr") American when `steps` is given."""
+    today = ql.Date(FIXTURE_DAY.day, FIXTURE_DAY.month, FIXTURE_DAY.year)
+    ql.Settings.instance().evaluationDate = today
+    dc = ql.Actual365Fixed()
+    process = ql.BlackScholesMertonProcess(
+        ql.QuoteHandle(ql.SimpleQuote(GRID_SPOT)),
+        ql.YieldTermStructureHandle(ql.FlatForward(today, GRID_Q, dc)),
+        ql.YieldTermStructureHandle(ql.FlatForward(today, GRID_R, dc)),
+        ql.BlackVolTermStructureHandle(ql.BlackConstantVol(today, ql.NullCalendar(), sigma, dc)))
+    payoff = ql.PlainVanillaPayoff(ql.Option.Call if kind == "C" else ql.Option.Put, K)
+    if steps is None:
+        option = ql.VanillaOption(payoff, ql.EuropeanExercise(today + days))
+        option.setPricingEngine(ql.AnalyticEuropeanEngine(process))
+    else:
+        option = ql.VanillaOption(payoff, ql.AmericanExercise(today, today + days))
+        option.setPricingEngine(ql.BinomialVanillaEngine(process, "crr", steps))
+    return option
+
+
+def stage_pricer_check(cfg) -> Path:
+    """O-50 (a): the largest gap of each kickoff Section 8 pricer check over the 2.1 grid, so that research question 1
+    has a source table (pricer_check.csv); the CRR rows are in units of S, as their bounds are."""
+    tol, n = cfg.tolerances, cfg.pricing.n_validate
+    gaps = {name: [] for name in ("bsm_vs_quantlib", "black76_vs_bsm", "crr_american_vs_quantlib_rel_spot",
+                                  "crr_european_vs_analytic_rel_spot", *[f"{g}_vs_quantlib" for g in GREEK_NAMES])}
+    args = (GRID_R, GRID_Q)
+    for kind, K, days, sigma in GRID:
+        T = days / 365
+        price = float(bsm(GRID_SPOT, K, T, *args, sigma, kind))
+        option = _ql_option(K, days, sigma, kind)
+        gaps["bsm_vs_quantlib"].append(abs(price - option.NPV()))
+        F, D = GRID_SPOT * np.exp((GRID_R - GRID_Q) * T), np.exp(-GRID_R * T)
+        gaps["black76_vs_bsm"].append(abs(float(black76(F, K, T, D, sigma, kind)) - price))
+        american = _ql_option(K, days, sigma, kind, n).NPV()
+        gaps["crr_american_vs_quantlib_rel_spot"].append(
+            abs(crr(GRID_SPOT, K, T, *args, sigma, kind, n, True) - american) / GRID_SPOT)
+        gaps["crr_european_vs_analytic_rel_spot"].append(
+            abs(crr(GRID_SPOT, K, T, *args, sigma, kind, n, False) - price) / GRID_SPOT)
+        ours = greeks(GRID_SPOT, K, T, *args, sigma, kind)
+        for g in GREEK_NAMES:
+            gaps[f"{g}_vs_quantlib"].append(abs(float(ours[g]) - getattr(option, g)()))
+    bounds = {"bsm_vs_quantlib": tol.bsm_vs_quantlib, "black76_vs_bsm": BLACK76_BOUND,
+              "crr_american_vs_quantlib_rel_spot": tol.crr_amer_vs_quantlib_rel_spot,
+              "crr_european_vs_analytic_rel_spot": tol.crr_euro_vs_analytic_rel_spot}
+    table = pd.DataFrame([{"check": name, "n_cases": len(v), "largest_gap": max(v),
+                           "bound": bounds.get(name, GREEK_BOUND)} for name, v in gaps.items()])
+    table["passed"] = table["largest_gap"] <= table["bound"]
+    TABLES.mkdir(parents=True, exist_ok=True)
+    out = TABLES / "pricer_check.csv"
+    table.to_csv(out, **CSV)
+    print(table.to_string())
+    return out
+
+
+def stage_iv_tree(cfg) -> Path:
+    """Instruction 04 step 4.0: the N = n_prod against N = n_validate measurement of scripts/measure_iv_tree.py."""
+    from scripts.measure_iv_tree import main as measure
+
+    measure()
+    return TABLES / "iv_tree_convergence.csv"
 
 
 def _iv_day(day: date, chains: pd.DataFrame, underlying: pd.DataFrame, cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -914,7 +1008,7 @@ def stage_strategies(cfg) -> Path:
 
 def stage_attribution(cfg) -> Path:
     """PLAN 9.2 with instruction 09: hedging_frequency.csv and attribution_live.csv (reads live_straddles.csv), and
-    the MEASURE of step 9.1."""
+    the synthetic path of step 9.1 in attribution_synthetic.csv (O-51 (a))."""
     freq = pd.concat([simulate_hedging(m, cfg) for m in ("gbm", "heston")], ignore_index=True)
     live = attribute_live(pd.read_csv(TABLES / "live_straddles.csv", dtype={"open_day": str, "expiry": str,
                                                                            "mark_day": str}))
@@ -922,6 +1016,7 @@ def stage_attribution(cfg) -> Path:
     freq.to_csv(TABLES / "hedging_frequency.csv", **CSV)
     live.to_csv(TABLES / "attribution_live.csv", **CSV)
     path = bs_path_attribution(cfg)
+    path.to_csv(TABLES / "attribution_synthetic.csv", **CSV)
     print(path.to_string())
     print(f"MEASURE median explained share, {len(path)} daily steps: {path['explained_share'].median():.6f}")
     print(freq.to_string())
@@ -977,22 +1072,86 @@ def stage_report(cfg) -> Path:
     return build_risk_report(days[-1], grid, risk, breaches, REPORTS / f"risk_{days[-1]}.pdf", len(days))
 
 
-STAGES = {"capture_health": stage_capture_health, "clean_log": stage_clean_log, "eep": stage_eep, "iv": stage_iv,
+def stage_answers(cfg) -> Path:
+    """PLAN 11.2 with instruction 11: answers.csv, each row tied to a source table and row."""
+    from volsurf.answers import build_answers
+
+    table = build_answers(TABLES, cfg)
+    out = TABLES / "answers.csv"
+    table.to_csv(out, index=False, lineterminator="\n", encoding="utf-8")
+    print(table.to_string())
+    return out
+
+
+def _test_count() -> int:
+    """The number of tests pytest collects, for the README's status line (instruction 11 step 11.3)."""
+    res = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q"], cwd=ROOT, capture_output=True,
+                         text=True, check=True)
+    return int(re.search(r"(\d+) tests? collected", res.stdout).group(1))
+
+
+def stage_readme(cfg) -> Path:
+    """PLAN 11.3 with instruction 11: README.md from docs/README.template.md and the tables."""
+    from volsurf.readme import build_readme
+
+    out = ROOT / "README.md"
+    template = (ROOT / "docs" / "README.template.md").read_text(encoding="utf-8")
+    out.write_text(build_readme(template, TABLES, _test_count(), cfg.events.min_n), encoding="utf-8", newline="\n")
+    print(f"README.md: {out.stat().st_size} bytes")
+    return out
+
+
+STAGES = {"snapshots": stage_snapshots, "capture_health": stage_capture_health, "pricer_check": stage_pricer_check,
+          "eep": stage_eep, "clean_log": stage_clean_log, "iv_tree": stage_iv_tree, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
           "vrp": stage_vrp, "strategies": stage_strategies, "attribution": stage_attribution,
-          "risk": stage_risk, "report": stage_report}
+          "risk": stage_risk, "report": stage_report, "answers": stage_answers, "readme": stage_readme}
+
+STAGE_OUTPUTS = {  # what each stage writes, {day} for any capture day; tests/test_run_all.py holds PLAN.md to it
+    "snapshots": ["data/raw/snapshot_manifest.csv"],
+    "capture_health": ["outputs/tables/capture_health.csv"],
+    "pricer_check": ["outputs/tables/pricer_check.csv"],
+    "eep": ["outputs/tables/eep_rows.csv", "outputs/tables/eep_summary.csv"],
+    "clean_log": ["outputs/tables/clean_log_fixture.csv"],
+    "iv_tree": ["outputs/tables/iv_tree_convergence.csv"],
+    "iv": ["outputs/tables/iv_summary.csv", "outputs/tables/parity_forwards_fixture.csv"],
+    "surface": ["outputs/tables/svi_fits.csv", "outputs/tables/surface_daily.csv",
+                "outputs/tables/calendar_violations.csv", "outputs/tables/ssvi_theta.csv",
+                "outputs/figures/spx_smiles_{day}.png", "outputs/figures/spx_smile_fits_{day}.png",
+                "outputs/figures/spx_surface_last.png", "outputs/figures/spx_metrics.png"],
+    "density": ["outputs/tables/density_checks.csv"],
+    "tails": ["outputs/tables/tail_probs.csv", "outputs/tables/pit.csv", "outputs/figures/spx_density_last.png"],
+    "events": ["outputs/tables/events.csv", "outputs/tables/event_summary.csv", "outputs/figures/event_scatter.png",
+               "outputs/figures/event_term_structures.png"],
+    "cor3m": ["outputs/tables/cor3m_study.csv", "outputs/figures/cor3m_vs_realised.png"],
+    "live_corr": ["outputs/tables/implied_corr_live.csv", "outputs/tables/rv_screen.csv"],
+    "vrp": ["outputs/tables/vrp_monthly.csv"],
+    "strategies": ["outputs/tables/strategies.csv", "outputs/tables/strategy_stats.csv", "outputs/tables/spec_log.csv",
+                   "outputs/tables/live_straddles.csv", "outputs/figures/vrp_vix2_vs_rv.png",
+                   "outputs/figures/vrp_cumulative.png", "outputs/figures/vrp_drawdowns.png"],
+    "attribution": ["outputs/tables/hedging_frequency.csv", "outputs/tables/attribution_live.csv",
+                    "outputs/tables/attribution_synthetic.csv"],
+    "risk": ["outputs/tables/risk_book.csv", "outputs/tables/risk_grid.csv", "outputs/tables/limit_breaches.csv"],
+    "report": ["outputs/reports/risk_{day}.pdf"],
+    "answers": ["outputs/tables/answers.csv"],
+    "readme": ["README.md"],
+}
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--stage", choices=[*STAGES, "all"], required=True)
+    p.add_argument("--stage", choices=[*STAGES, "all"], default="all")
     p.add_argument("--force", action="store_true", help="surface stage: refit every day, ignoring the cache")
     args = p.parse_args(argv)
     cfg = load_config()
+    begin = time.perf_counter()
     for name in STAGES if args.stage == "all" else [args.stage]:
         kwargs = {"force": args.force} if name == "surface" else {}
+        start = time.perf_counter()
         print(f"{name}: wrote {STAGES[name](cfg, **kwargs)}")
+        print(f"runtime {name}: {time.perf_counter() - start:.1f} s", flush=True)
+    print(f"runtime total: {time.perf_counter() - begin:.1f} s")
     return 0
 
 
