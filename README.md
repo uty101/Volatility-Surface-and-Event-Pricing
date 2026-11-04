@@ -6,7 +6,7 @@ Tests the volatility risk premium on S&P 500 history from 1990 and implied again
 Splits delta-hedged option P&L into Greeks and builds a 1-page daily risk report.
 Option chains are captured daily from 2026-10-28, so every live result is a method demonstration with its N stated.
 
-Results are in [`outputs/`](outputs/). [![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) 4,728 tests.
+Results are in [`outputs/`](outputs/). [![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) 4,729 tests.
 
 **Capture window:** 2026-10-28 to 2026-11-03, 4 days, 2026-11-02 missed. The first day holds `^SPX`, SPY and AAPL only, from an in-session test capture. The others hold all 37 underlyings.
 

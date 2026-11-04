@@ -1,4 +1,6 @@
+import io
 import re
+import sys
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -54,3 +56,10 @@ def test_snapshots_stage_prints_the_day_count(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "pulled snapshots" in out
     assert "capture days: 3, 2026-10-28 to 2026-11-03" in out
+
+
+def test_main_prints_the_minus_sign_on_a_cp1252_stdout(monkeypatch):
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")  # a piped stdout on Windows
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setitem(run_all.STAGES, "answers", lambda cfg: print("\u2212"))
+    assert run_all.main(["--stage", "answers"]) == 0

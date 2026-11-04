@@ -1144,6 +1144,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--stage", choices=[*STAGES, "all"], default="all")
     p.add_argument("--force", action="store_true", help="surface stage: refit every day, ignoring the cache")
     args = p.parse_args(argv)
+    sys.stdout.reconfigure(encoding="utf-8")  # answers holds U+2212, which a piped Windows stdout (cp1252) cannot encode
     cfg = load_config()
     begin = time.perf_counter()
     for name in STAGES if args.stage == "all" else [args.stage]:
