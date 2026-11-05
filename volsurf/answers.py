@@ -17,6 +17,7 @@ ANSWER_COLUMNS = ["question", "answer", "value", "source_table", "source_row", "
 ALL_ROWS = "all"
 ACCEPTED_ROWS = "status=ok|ok_refit"
 AGGREGATES = {"sum": "sum", "mean": "mean", "median": "median", "min": "min", "max": "max"}
+MAIN_SPEC = "timed_put_main"
 PROXY = ("COR3M covers single stocks and this proxy uses sector ETFs, which correlate with each other more, so implied "
          "sits below realised; the gap is the proxy, not a correlation risk premium")
 
@@ -173,7 +174,7 @@ def _question_3(a: _Answers, min_n: int) -> None:
 
 
 def _question_4(a: _Answers, strategy_start: str) -> None:
-    vrp, stats, spec = "vrp_monthly", "strategy_stats", "spec_log"
+    vrp, stats, spec, family = "vrp_monthly", "strategy_stats", "spec_log", "spec_family"
     both = "iv!=;rv_fwd_21!="
     n = int(a.get(vrp, both, "count(*)"))
     a.add(4, f"VIX squared sat above the variance that followed by {{:.5f}} of annualised variance on average, over {n} "
@@ -195,13 +196,25 @@ def _question_4(a: _Answers, strategy_start: str) -> None:
           "strategy=put", "sharpe")
     a.add(4, "PUT's worst month was {:.2f}%.", stats, "strategy=put", "worst_month", 100)
     n_trials = int(a.get(stats, "strategy=timed_put", "n_trials"))
-    status = a.get(stats, "strategy=timed_put", "dsr_status")
+    trials = f"N = {n_trials} trials, {months} months"
+    a.add(4, f"PUT alone has a probabilistic Sharpe of {{:.3f}} against 0 over {months} months, so it very likely pays.",
+          family, "series=excess;spec_id=put", "psr_zero")
     a.add(4, f"Timing on implied minus GARCH variance gives a raw Sharpe of {{:.2f}} over {months} months, after the "
              "switching cost.", stats, "strategy=timed_put", "sharpe")
-    a.add(4, f"The deflated Sharpe beside it is blank, with status {status}, because {n_trials} specification was tried "
-             "and the deflation needs at least 2.", stats, "strategy=timed_put", "deflated_sharpe")
-    a.add(4, "So the number of specifications tried is {:.0f}, and the raw figure is 1 specification of a family, not "
-             "evidence that timing improves the deflated Sharpe.", spec, ALL_ROWS, "count(*)")
+    a.add(4, f"Its deflated Sharpe on excess returns over T-bills is {{:.3f}} ({trials}), so the timed PUT very likely "
+             "pays too.", stats, "strategy=timed_put", "deflated_sharpe")
+    a.add(4, "The number of specifications tried is {:.0f}.", spec, ALL_ROWS, "count(*)")
+    main = f"series=timed_minus_put;spec_id={MAIN_SPEC}"
+    a.add(4, "Whether timing improves on selling puts is a question about the monthly series timed minus PUT. On its own "
+             f"the GARCH rule looks better: that series has an annualised Sharpe of {a.get(family, main, 'sharpe'):.3f} "
+             f"and a probabilistic Sharpe of {{:.3f}} against 0 over {months} months.", family, main, "psr_zero")
+    a.add(4, f"After counting the {n_trials} rules tried, its deflated Sharpe is {{:.3f}} ({trials}), so its gain over "
+             "holding PUT cannot be told apart from luck.", family, main, "deflated_sharpe")
+    others = f"series=timed_minus_put;spec_id!={MAIN_SPEC}"
+    shown = ", ".join(f"{r.spec_id} {float(r.sharpe):.3f}"
+                      for r in select_rows(read_table(a.tables / f"{family}.csv"), others).itertuples())
+    a.add(4, f"{{:.0f}} of the other {n_trials - 1} rules did worse than PUT, with a negative annualised Sharpe of timed "
+             f"minus PUT: {shown} ({trials}).", family, f"{others};sharpe<0", "count(*)")
     decided = sorted(read_table(a.tables / "strategies.csv")["month_end"])[-2]  # the last month's position, set a month before
     a.add(4, "The raw gain over PUT comes from sitting out {:.0f} months.", vrp,
           f"month_end>={strategy_start};month_end<={decided};signal<=0", "count(*)")

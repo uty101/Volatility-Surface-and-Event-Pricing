@@ -68,12 +68,18 @@ from volsurf.risk import (
 from volsurf.ssvi import ssvi_w, surface_day, theta_at
 from volsurf.svi import ACCEPTED, PARAMS, svi_w
 from volsurf.vrp import (
+    MAIN_ID,
+    SPEC_FAMILY,
     STATS_COLUMNS,
     append_spec,
     deflated_sharpe,
     drawdown,
+    family_table,
     live_straddles,
+    log_returns,
     monthly_returns,
+    series_moments,
+    spec_signals,
     strategy_returns,
     strategy_stats,
     tbill_returns,
@@ -925,18 +931,31 @@ def fig_drawdowns(strat: pd.DataFrame) -> Path:
     return _save(fig, FIGURES / "vrp_drawdowns.png")
 
 
-MAIN_SPEC = {  # kickoff 5.9 and instruction 08: the main specification, row 1 of spec_log.csv
-    "spec_id": "timed_put_main",
-    "description": "timed PUT: hold Cboe PUT in month m+1 if (VIX/100)^2 minus the GARCH(1,1) 21-session forecast at "
-                   "month end m is above 0, else T-bills; switch cost on every change, the first included",
+RULE = "; hold Cboe PUT in month m+1 if it is above 0, else T-bills; switch cost on every change, the first included"
+SPEC_DESCRIPTIONS = {  # the closed family of instruction 12 step 12.1; the main specification is row 1 (instruction 08)
+    MAIN_ID: "timed PUT: hold Cboe PUT in month m+1 if (VIX/100)^2 minus the GARCH(1,1) 21-session forecast at "
+             "month end m is above 0, else T-bills; switch cost on every change, the first included",
+    "iv_minus_rv21": "timed PUT: (VIX/100)^2 minus 252/21 x the sum of r^2 over the 21 sessions ending at m" + RULE,
+    "iv_minus_rv63": "timed PUT: (VIX/100)^2 minus 252/63 x the sum of r^2 over the 63 sessions ending at m" + RULE,
+    "iv_minus_ewma": "timed PUT: (VIX/100)^2 minus 252 x the EWMA of r^2 from 1990-01-02" + RULE,
+    "garch_above_median": "timed PUT: the main signal minus its expanding median over month ends strictly before m" + RULE,
+}
+SPEC_SIGNALS = {  # what params_json records of each signal
+    MAIN_ID: {"signal": "iv_minus_garch"},
+    "iv_minus_rv21": {"signal": "iv_minus_rv", "window": 21},
+    "iv_minus_rv63": {"signal": "iv_minus_rv", "window": 63},
+    "iv_minus_ewma": {"signal": "iv_minus_ewma", "alpha": 0.06, "adjust": False},
+    "garch_above_median": {"signal": "iv_minus_garch_minus_expanding_median"},
 }
 
 
-def spec_params(cfg) -> dict:
+def spec_params(cfg, spec_id: str = MAIN_ID) -> dict:
     v = cfg.vrp
-    return {"signal": "iv_minus_garch", "threshold": 0.0, "horizon": v.horizon, "garch_min_obs": v.garch_min_obs,
-            "switch_cost_bp": v.switch_cost_bp, "strategy_start": v.strategy_start,
-            "tbill": "DTB3 on the last session of month m / 1200"}
+    params = {**SPEC_SIGNALS[spec_id], "threshold": 0.0, "switch_cost_bp": v.switch_cost_bp,
+              "strategy_start": v.strategy_start, "tbill": "DTB3 on the last session of month m / 1200"}
+    if "garch" in params["signal"]:
+        params.update(horizon=v.horizon, garch_min_obs=v.garch_min_obs)
+    return params
 
 
 def straddle_inputs() -> tuple[list[str], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -960,11 +979,13 @@ def straddle_inputs() -> tuple[list[str], pd.DataFrame, pd.DataFrame, pd.DataFra
 
 def stage_strategies(cfg) -> Path:
     """PLAN 8.2 with instruction 08: strategies.csv (STRATEGIES) on the common window from `[vrp] strategy_start`,
-    strategy_stats.csv (the 4 strategies, then `bxm_long` from `[vrp] bxm_start`, O-28 (a)), spec_log.csv with the
-    deflated Sharpe of the timed PUT, live_straddles.csv, and the 3 Section 8 figures; reads vrp_monthly.csv."""
+    strategy_stats.csv (the 4 strategies, then `bxm_long` from `[vrp] bxm_start`, O-28 (a)), spec_log.csv with the 5
+    specifications of instruction 12, spec_family.csv with its 2 deflated Sharpes, live_straddles.csv, and the 3
+    Section 8 figures; reads vrp_monthly.csv."""
     v = cfg.vrp
     vm = pd.read_csv(TABLES / "vrp_monthly.csv", dtype={"month_end": str})
     sig = pd.Series(vm["signal"].to_numpy(), index=pd.to_datetime(vm["month_end"]))
+    iv = pd.Series(vm["iv"].to_numpy(), index=sig.index)
     index, put, bxm, dtb3 = pd.read_parquet(RAW / "prices" / "index.parquet"), _cboe("PUT"), _cboe("BXM"), _dtb3()
     strat = strategy_returns(put, bxm, index["^SP500TR"], dtb3, sig[sig.index >= v.strategy_start],
                              v.switch_cost_bp)
@@ -975,11 +996,19 @@ def stage_strategies(cfg) -> Path:
              for c in ["put", "bxm", "sp500tr", "timed_put"]]
     stats.append(strategy_stats("bxm_long", bxm_long["bxm"], bxm_long["tbill"], bxm_long["month_end"]))
     timed = stats[3]
-    log = append_spec(TABLES / "spec_log.csv", MAIN_SPEC["spec_id"], MAIN_SPEC["description"], spec_params(cfg),
-                      timed["sharpe"], timed["n_months"])
+    signals = spec_signals(sig, iv, log_returns(index["^GSPC"], v.start))
+    signals = signals[signals.index >= v.strategy_start]
+    runs = {c: strategy_returns(put, bxm, index["^SP500TR"], dtb3, signals[c], v.switch_cost_bp)["timed_put"]
+            for c in SPEC_FAMILY}
+    excess = pd.DataFrame({c: runs[c] - strat["tbill"] for c in SPEC_FAMILY})
+    timed_minus_put = pd.DataFrame({c: runs[c] - strat["put"] for c in SPEC_FAMILY})
+    for c in SPEC_FAMILY:
+        m = series_moments(excess[c])
+        log = append_spec(TABLES / "spec_log.csv", c, SPEC_DESCRIPTIONS[c], spec_params(cfg, c), m["sr"] * np.sqrt(12),
+                          m["n_obs"])
     trials = log["sharpe"].astype(float) / np.sqrt(12)  # O-17 (a): monthly Sharpe ratios
-    dsr = deflated_sharpe(sr=timed["sharpe"] / np.sqrt(12), n_obs=timed["n_months"], skew=timed["skew"],
-                          kurt_pearson=timed["excess_kurtosis"] + 3, sr_trials=trials)
+    dsr = deflated_sharpe(**series_moments(excess[MAIN_ID]), sr_trials=trials)  # instruction 12: the series tested
+    family = family_table(excess, timed_minus_put, strat["put"] - strat["tbill"])
     for s in stats:
         s.update(n_trials=np.nan, deflated_sharpe=np.nan, dsr_status="")
     timed.update(n_trials=len(log), deflated_sharpe=dsr, dsr_status="ok" if len(log) >= 2 else "too_few_trials")
@@ -989,6 +1018,7 @@ def stage_strategies(cfg) -> Path:
     TABLES.mkdir(parents=True, exist_ok=True)
     strat.to_csv(TABLES / "strategies.csv", **CSV)
     stats.to_csv(TABLES / "strategy_stats.csv", **CSV)
+    family.to_csv(TABLES / "spec_family.csv", **CSV)
     straddles.to_csv(TABLES / "live_straddles.csv", **CSV)
     print(strat.head(3).to_string())
     print(strat.tail(3).to_string())
@@ -996,6 +1026,7 @@ def stage_strategies(cfg) -> Path:
           f"(the first position counts)")
     print(stats.to_string())
     print(log.to_string())
+    print(family.to_string())
     for c in ["put", "bxm", "sp500tr", "timed_put"]:
         print(f"10 worst months, {c}:")
         print(strat.sort_values(c, kind="stable").head(10)[["month_end", c, "tbill"]].to_string())
@@ -1128,7 +1159,7 @@ STAGE_OUTPUTS = {  # what each stage writes, {day} for any capture day; tests/te
     "live_corr": ["outputs/tables/implied_corr_live.csv", "outputs/tables/rv_screen.csv"],
     "vrp": ["outputs/tables/vrp_monthly.csv"],
     "strategies": ["outputs/tables/strategies.csv", "outputs/tables/strategy_stats.csv", "outputs/tables/spec_log.csv",
-                   "outputs/tables/live_straddles.csv", "outputs/figures/vrp_vix2_vs_rv.png",
+                   "outputs/tables/spec_family.csv", "outputs/tables/live_straddles.csv", "outputs/figures/vrp_vix2_vs_rv.png",
                    "outputs/figures/vrp_cumulative.png", "outputs/figures/vrp_drawdowns.png"],
     "attribution": ["outputs/tables/hedging_frequency.csv", "outputs/tables/attribution_live.csv",
                     "outputs/tables/attribution_synthetic.csv"],

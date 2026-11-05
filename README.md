@@ -6,7 +6,7 @@ Tests the volatility risk premium on S&P 500 history from 1990 and implied again
 Splits delta-hedged option P&L into Greeks and builds a 1-page daily risk report.
 Option chains are captured daily from 2026-10-28, so every live result is a method demonstration with its N stated.
 
-Results are in [`outputs/`](outputs/). [![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) 4,729 tests.
+Results are in [`outputs/`](outputs/). [![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) 4,740 tests.
 
 **Capture window:** 2026-10-28 to 2026-11-03, 4 days, 2026-11-02 missed. The first day holds `^SPX`, SPY and AAPL only, from an in-session test capture. The others hold all 37 underlyings.
 
@@ -66,7 +66,7 @@ Points above the line moved more than the options priced. 4 points say nothing a
 
 ## 4. The volatility risk premium
 
-VIX squared sat above the variance that followed by 0.01037 of annualised variance on average, over 441 months from 1990. Over the 394 months that also have a GARCH forecast the mean gap is 0.00970. Implied variance is above the GARCH forecast in 362 of 395 month ends. The forecast says little about the size of the gap: the correlation of the signal with the later gap is 0.15 over 394 months. Selling puts paid, but less per unit of risk than holding the index: Cboe PUT has a Sharpe of 0.56 over 237 months from 2007, against 0.65 for the S&P 500 total return index and 0.44 for BXM. The index carries no trading costs of its own, so the only cost deducted here is the timed strategy's switching cost. PUT's worst month was −17.65%. Timing on implied minus GARCH variance gives a raw Sharpe of 0.80 over 237 months, after the switching cost. The deflated Sharpe beside it is blank, with status too_few_trials, because 1 specification was tried and the deflation needs at least 2. So the number of specifications tried is 1, and the raw figure is 1 specification of a family, not evidence that timing improves the deflated Sharpe. The raw gain over PUT comes from sitting out 27 months.
+VIX squared sat above the variance that followed by 0.01037 of annualised variance on average, over 441 months from 1990. Over the 394 months that also have a GARCH forecast the mean gap is 0.00970. Implied variance is above the GARCH forecast in 362 of 395 month ends. The forecast says little about the size of the gap: the correlation of the signal with the later gap is 0.15 over 394 months. Selling puts paid, but less per unit of risk than holding the index: Cboe PUT has a Sharpe of 0.56 over 237 months from 2007, against 0.65 for the S&P 500 total return index and 0.44 for BXM. The index carries no trading costs of its own, so the only cost deducted here is the timed strategy's switching cost. PUT's worst month was −17.65%. PUT alone has a probabilistic Sharpe of 0.984 against 0 over 237 months, so it very likely pays. Timing on implied minus GARCH variance gives a raw Sharpe of 0.80 over 237 months, after the switching cost. Its deflated Sharpe on excess returns over T-bills is 0.994 (N = 5 trials, 237 months), so the timed PUT very likely pays too. The number of specifications tried is 5. Whether timing improves on selling puts is a question about the monthly series timed minus PUT. On its own the GARCH rule looks better: that series has an annualised Sharpe of 0.240 and a probabilistic Sharpe of 0.915 against 0 over 237 months. After counting the 5 rules tried, its deflated Sharpe is 0.412 (N = 5 trials, 237 months), so its gain over holding PUT cannot be told apart from luck. 4 of the other 4 rules did worse than PUT, with a negative annualised Sharpe of timed minus PUT: iv_minus_rv21 −0.051, iv_minus_rv63 −0.403, iv_minus_ewma −0.003, garch_above_median −0.158 (N = 5 trials, 237 months). The raw gain over PUT comes from sitting out 27 months.
 
 | strategy | months | mean % | vol % | Sharpe | worst month % | worst drawdown % | skew | excess kurtosis |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -80,7 +80,7 @@ VIX squared sat above the variance that followed by 0.01037 of annualised varian
 
 ![VIX squared against realised](outputs/figures/vrp_vix2_vs_rv.png)
 
-The timed line ends highest of the option strategies, with a Sharpe of 0.80 against PUT's 0.56. That is 1 specification, so read it with the deflated Sharpe note above.
+The timed line ends highest of the option strategies, with a Sharpe of 0.80 against PUT's 0.56. That is 1 specification of 5, so read it with the deflated Sharpes above.
 
 ![Cumulative excess return](outputs/figures/vrp_cumulative.png)
 
@@ -130,14 +130,14 @@ On the live delta-hedged ^SPX straddles the median explained share is 0.977 (N =
 | AAPL 2027-01-15 C 335 | 1 | 20 | 24.56 | svi | 334438 | 24075 | 1186 |
 | NVDA 2026-12-18 P 193 | −1 | 15 | 46.31 | svi | 92455 | −6670 | −388 |
 
-The worst cell of the grid loses 447.4 thousand dollars, at spot −10% and vol +5 points. 1 of 9 limits is breached: ^SPX dollar gamma of 1,003,799 against 250,000, which the short wings produce and the report is meant to show.
+The worst cell of the grid loses 447.4 thousand dollars, at spot −10% and vol +5 points. 1 of 9 limits is breached: ^SPX dollar gamma of −1,003,799 against a limit of 250,000, which the short wings produce and the report is meant to show.
 
 ## What this does not do
 
 - The live window is a few weeks, so nothing built on captured chains is a statistical result.
 - Option prices are Yahoo's delayed quotes at 15:30 New York, not exchange data.
 - The COR3M comparison is a sector proxy, because COR3M covers single stocks and the realised side uses sector ETFs.
-- The timed PUT result is 1 specification of a family.
+- The timed PUT result is 1 specification of a family of 5, and its gain over PUT does not survive the deflation.
 - The risk book is a sample, not a real portfolio.
 
 `instructions/`, `review/`, `decisions/` and `PLAN.md` are the record of how this was built. The source outline is in [`project_outline/`](project_outline/). MIT licence, see [`LICENSE`](LICENSE).

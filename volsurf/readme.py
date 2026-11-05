@@ -119,7 +119,7 @@ def readme_values(tables: Path, n_tests: int, min_n: int) -> dict[str, str]:
         "grid_vol": f"{float(book.loc[worst, 'vol_shock_pts']):.0f}",
         "n_breaches": str(len(breach)),
         "breach_underlying": ", ".join(breach["underlying"]),
-        "breach_value": f"{abs(float(breach['value'].iloc[0])):,.0f}" if len(breach) else "",
+        "breach_value": f"{float(breach['value'].iloc[0]):,.0f}".replace("-", MINUS) if len(breach) else "",
         "breach_limit": f"{float(breach['limit'].iloc[0]):,.0f}" if len(breach) else "",
     }
 

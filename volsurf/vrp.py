@@ -2,8 +2,8 @@
 
 VIX squared against the variance of the S&P 500 over the next 21 sessions from 1990, a GARCH(1,1) forecast as the ex
 ante gap, Cboe PUT and BXM as investable short volatility return series, and a timed PUT that holds PUT only when
-implied variance is above the GARCH forecast. The timed PUT is 1 specification out of a family, so its Sharpe ratio is
-reported beside the deflated Sharpe ratio, with the number of specifications tried.
+implied variance is above the GARCH forecast. The timed PUT is 1 specification out of a closed family of 5 (instruction
+12), so its Sharpe ratio is reported beside the deflated Sharpe ratio, with the number of specifications tried.
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ STATS_COLUMNS = ["strategy", "first_month", "last_month", "n_months", "ann_mean"
                  "dsr_status"]
 STRADDLE_COLUMNS = ["open_day", "expiry", "strike", "mark_day", "T", "S", "F", "D", "vol", "value", "delta",
                     "option_pnl", "hedge_pnl", "total_pnl", "status"]
+FAMILY_COLUMNS = ["series", "spec_id", "n_months", "sharpe", "sharpe_monthly", "skew", "kurt_pearson", "n_trials",
+                  "sr_var", "sr0", "deflated_sharpe", "psr_zero"]
+SPEC_FAMILY = ("timed_put_main", "iv_minus_rv21", "iv_minus_rv63", "iv_minus_ewma", "garch_above_median")  # instruction 12
+MAIN_ID = SPEC_FAMILY[0]
 MONTHS = 12  # Convention 4.14: monthly series x 12 for means, sqrt(12) for vol
 EULER_GAMMA = 0.5772156649015329  # Bailey and Lopez de Prado (2014), the expected maximum of N Sharpe ratios
 
@@ -161,6 +165,50 @@ def strategy_stats(name: str, r: pd.Series, tbill: pd.Series, month_end: pd.Seri
             "q01": float(r.quantile(0.01)), "q05": float(r.quantile(0.05))}
 
 
+def spec_signals(main: pd.Series, iv: pd.Series, returns: pd.Series) -> pd.DataFrame:
+    """Instruction 12 step 12.1: s_m of the 5 specifications at the month ends of `main`, the VRP_MONTHLY signal, each
+    using data up to and including m. `iv` is (VIX / 100)^2 at those month ends, `returns` the daily `^GSPC` log returns
+    from `[vrp] start`. Column order is SPEC_FAMILY.
+
+    The 21, the 63 and alpha = 0.06 (lambda = 0.94) are the constants of the instruction's table. The EWMA is
+    `adjust=False`, so it starts at the first squared return. The expanding median is shifted by 1 month end, so it
+    holds only month ends strictly before m."""
+    r2 = returns**2
+    ends = main.index
+
+    def rv(n: int) -> pd.Series:
+        return (r2.rolling(n).sum() * 252 / n).reindex(ends)
+
+    ewma = (r2.ewm(alpha=0.06, adjust=False).mean() * 252).reindex(ends)
+    out = pd.DataFrame({"timed_put_main": main, "iv_minus_rv21": iv - rv(21), "iv_minus_rv63": iv - rv(63),
+                        "iv_minus_ewma": iv - ewma, "garch_above_median": main - main.expanding().median().shift(1)})
+    return out[list(SPEC_FAMILY)]
+
+
+def series_moments(x: pd.Series) -> dict:
+    """What the Sharpe tests need of the monthly series `x` itself (instruction 12): monthly Sharpe mean / sd, the
+    number of months, skew and non-excess kurtosis (pandas, bias corrected, as `strategy_stats`)."""
+    return {"sr": float(x.mean() / x.std()), "n_obs": len(x), "skew": float(x.skew()), "kurt_pearson": float(x.kurt() + 3)}
+
+
+def expected_max_sharpe(sr_trials: pd.Series) -> float:
+    """SR_0 of `deflated_sharpe`: the Sharpe ratio expected of the best of N trials with no skill. NaN below 2 trials."""
+    trials = pd.Series(sr_trials, dtype=float)
+    n = len(trials)
+    if n < 2:
+        return float("nan")
+    return float(np.sqrt(trials.var(ddof=1)) * ((1 - EULER_GAMMA) * norm.ppf(1 - 1 / n)
+                                                + EULER_GAMMA * norm.ppf(1 - 1 / (n * np.e))))
+
+
+def probabilistic_sharpe(sr: float, n_obs: int, skew: float, kurt_pearson: float, sr_star: float = 0.0) -> float:
+    """Bailey and Lopez de Prado (2012): the probability that the true Sharpe ratio is above `sr_star`, in the units of
+    one observation, with `kurt_pearson` as in `deflated_sharpe`:
+
+        PSR = Phi((SR - SR*) sqrt(n_obs - 1) / sqrt(1 - gamma_3 SR + (gamma_4 - 1) / 4 SR^2))"""
+    return float(norm.cdf((sr - sr_star) * np.sqrt(n_obs - 1) / np.sqrt(1 - skew * sr + (kurt_pearson - 1) / 4 * sr**2)))
+
+
 def deflated_sharpe(sr: float, n_obs: int, skew: float, kurt_pearson: float, sr_trials: pd.Series) -> float:
     """Bailey and Lopez de Prado (2014), the deflated Sharpe ratio, with every Sharpe ratio in the units of one
     observation (O-17 (a): monthly, so annualised Sharpe / sqrt(12) and `n_obs` in months).
@@ -173,14 +221,35 @@ def deflated_sharpe(sr: float, n_obs: int, skew: float, kurt_pearson: float, sr_
         DSR  = Phi((SR - SR_0) sqrt(n_obs - 1) / sqrt(1 - gamma_3 SR + (gamma_4 - 1) / 4 SR^2))
 
     NaN with fewer than 2 trials (instruction 08 point 4)."""
-    trials = pd.Series(sr_trials, dtype=float)
-    n = len(trials)
-    if n < 2:
-        return float("nan")
-    sr0 = np.sqrt(trials.var(ddof=1)) * ((1 - EULER_GAMMA) * norm.ppf(1 - 1 / n)
-                                         + EULER_GAMMA * norm.ppf(1 - 1 / (n * np.e)))
-    z = (sr - sr0) * np.sqrt(n_obs - 1) / np.sqrt(1 - skew * sr + (kurt_pearson - 1) / 4 * sr**2)
-    return float(norm.cdf(z))
+    sr0 = expected_max_sharpe(sr_trials)
+    return float("nan") if np.isnan(sr0) else probabilistic_sharpe(sr, n_obs, skew, kurt_pearson, sr0)
+
+
+def family_row(series: str, spec_id: str, x: pd.Series) -> dict:
+    """A row of spec_family.csv for the monthly series `x`, without the columns that need the family."""
+    m = series_moments(x)
+    return {"series": series, "spec_id": spec_id, "n_months": m["n_obs"], "sharpe": m["sr"] * np.sqrt(MONTHS),
+            "sharpe_monthly": m["sr"], "skew": m["skew"], "kurt_pearson": m["kurt_pearson"],
+            "psr_zero": probabilistic_sharpe(**m)}
+
+
+def family_rows(series: str, returns: pd.DataFrame) -> list[dict]:
+    """Rows of spec_family.csv for `returns`, 1 monthly column per specification. The main specification also gets N,
+    the variance of the family's monthly Sharpes, SR_0 and the deflated Sharpe against them (instruction 12)."""
+    rows = [family_row(series, c, returns[c]) for c in returns]
+    trials = pd.Series([r["sharpe_monthly"] for r in rows], dtype=float)
+    main = next(r for r in rows if r["spec_id"] == MAIN_ID)
+    main.update(n_trials=len(trials), sr_var=trials.var(ddof=1), sr0=expected_max_sharpe(trials),
+                deflated_sharpe=deflated_sharpe(**series_moments(returns[MAIN_ID]), sr_trials=trials))
+    return rows
+
+
+def family_table(excess: pd.DataFrame, timed_minus_put: pd.DataFrame, put_excess: pd.Series) -> pd.DataFrame:
+    """spec_family.csv (O-56 (a)): the 5 specifications on excess returns over T-bills, PUT alone on excess returns,
+    which is outside the family and so has no deflated Sharpe, and the 5 on timed minus PUT."""
+    rows = [*family_rows("excess", excess), family_row("excess", "put", put_excess),
+            *family_rows("timed_minus_put", timed_minus_put)]
+    return pd.DataFrame(rows, columns=FAMILY_COLUMNS)
 
 
 def append_spec(path: Path, spec_id: str, description: str, params: dict, sharpe: float, n_months: int) -> pd.DataFrame:

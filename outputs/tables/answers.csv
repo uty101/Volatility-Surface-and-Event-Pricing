@@ -30,9 +30,13 @@ question,answer,value,source_table,source_row,source_column
 4,The forecast says little about the size of the gap: the correlation of the signal with the later gap is 0.15 over 394 months.,0.1474838223,vrp_monthly.csv,iv!=;rv_fwd_21!=;garch_fc!=,"corr(signal,vrp)"
 4,"Selling puts paid, but less per unit of risk than holding the index: Cboe PUT has a Sharpe of 0.56 over 237 months from 2007, against 0.65 for the S&P 500 total return index and 0.44 for BXM. The index carries no trading costs of its own, so the only cost deducted here is the timed strategy's switching cost.",0.5553589463,strategy_stats.csv,strategy=put,sharpe
 4,PUT's worst month was -17.65%.,-0.1765015969,strategy_stats.csv,strategy=put,worst_month
+4,"PUT alone has a probabilistic Sharpe of 0.984 against 0 over 237 months, so it very likely pays.",0.9838948642,spec_family.csv,series=excess;spec_id=put,psr_zero
 4,"Timing on implied minus GARCH variance gives a raw Sharpe of 0.80 over 237 months, after the switching cost.",0.8025587878,strategy_stats.csv,strategy=timed_put,sharpe
-4,"The deflated Sharpe beside it is blank, with status too_few_trials, because 1 specification was tried and the deflation needs at least 2.",,strategy_stats.csv,strategy=timed_put,deflated_sharpe
-4,"So the number of specifications tried is 1, and the raw figure is 1 specification of a family, not evidence that timing improves the deflated Sharpe.",1,spec_log.csv,all,count(*)
+4,"Its deflated Sharpe on excess returns over T-bills is 0.994 (N = 5 trials, 237 months), so the timed PUT very likely pays too.",0.9935974831,strategy_stats.csv,strategy=timed_put,deflated_sharpe
+4,The number of specifications tried is 5.,5,spec_log.csv,all,count(*)
+4,Whether timing improves on selling puts is a question about the monthly series timed minus PUT. On its own the GARCH rule looks better: that series has an annualised Sharpe of 0.240 and a probabilistic Sharpe of 0.915 against 0 over 237 months.,0.915146243,spec_family.csv,series=timed_minus_put;spec_id=timed_put_main,psr_zero
+4,"After counting the 5 rules tried, its deflated Sharpe is 0.412 (N = 5 trials, 237 months), so its gain over holding PUT cannot be told apart from luck.",0.4116814612,spec_family.csv,series=timed_minus_put;spec_id=timed_put_main,deflated_sharpe
+4,"4 of the other 4 rules did worse than PUT, with a negative annualised Sharpe of timed minus PUT: iv_minus_rv21 -0.051, iv_minus_rv63 -0.403, iv_minus_ewma -0.003, garch_above_median -0.158 (N = 5 trials, 237 months).",4,spec_family.csv,series=timed_minus_put;spec_id!=timed_put_main;sharpe<0,count(*)
 4,The raw gain over PUT comes from sitting out 27 months.,27,vrp_monthly.csv,month_end>=2007-01-31;month_end<=2026-09-30;signal<=0,count(*)
 5,"Yes, in part. Regressing the next 63 sessions' realised sector correlation on COR3M gives a slope of 0.711 (Newey-West se 0.074), N = 5163 days.",0.71145938,cor3m_study.csv,all,slope
 5,"R² is 0.437, so COR3M accounts for a bit under half of the variation in next quarter's realised correlation (N = 5163 days).",0.4373451,cor3m_study.csv,all,r2

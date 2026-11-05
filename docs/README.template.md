@@ -64,7 +64,7 @@ Points above the line moved more than the options priced. {{n_events}} points sa
 
 ![VIX squared against realised](outputs/figures/vrp_vix2_vs_rv.png)
 
-The timed line ends highest of the option strategies, with a Sharpe of {{timed_sharpe}} against PUT's {{put_sharpe}}. That is 1 specification, so read it with the deflated Sharpe note above.
+The timed line ends highest of the option strategies, with a Sharpe of {{timed_sharpe}} against PUT's {{put_sharpe}}. That is 1 specification of 5, so read it with the deflated Sharpes above.
 
 ![Cumulative excess return](outputs/figures/vrp_cumulative.png)
 
@@ -96,14 +96,14 @@ Implied and realised move together, with a slope of {{cor3m_slope}} and an R² o
 
 {{table:risk_book}}
 
-The worst cell of the grid loses {{grid_worst}} thousand dollars, at spot {{grid_spot}}% and vol +{{grid_vol}} points. {{n_breaches}} of 9 limits is breached: {{breach_underlying}} dollar gamma of {{breach_value}} against {{breach_limit}}, which the short wings produce and the report is meant to show.
+The worst cell of the grid loses {{grid_worst}} thousand dollars, at spot {{grid_spot}}% and vol +{{grid_vol}} points. {{n_breaches}} of 9 limits is breached: {{breach_underlying}} dollar gamma of {{breach_value}} against a limit of {{breach_limit}}, which the short wings produce and the report is meant to show.
 
 ## What this does not do
 
 - The live window is a few weeks, so nothing built on captured chains is a statistical result.
 - Option prices are Yahoo's delayed quotes at 15:30 New York, not exchange data.
 - The COR3M comparison is a sector proxy, because COR3M covers single stocks and the realised side uses sector ETFs.
-- The timed PUT result is 1 specification of a family.
+- The timed PUT result is 1 specification of a family of 5, and its gain over PUT does not survive the deflation.
 - The risk book is a sample, not a real portfolio.
 
 `instructions/`, `review/`, `decisions/` and `PLAN.md` are the record of how this was built. The source outline is in [`project_outline/`](project_outline/). MIT licence, see [`LICENSE`](LICENSE).

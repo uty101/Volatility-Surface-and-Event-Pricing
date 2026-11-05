@@ -15,11 +15,16 @@ from volsurf.vrp import (
     VRP_COLUMNS,
     append_spec,
     deflated_sharpe,
+    expected_max_sharpe,
+    family_table,
     garch_monthly_forecasts,
     level_at,
     log_returns,
     month_ends,
+    probabilistic_sharpe,
     realised_var,
+    series_moments,
+    spec_signals,
     straddle_mark,
     strategy_returns,
     timed_positions,
@@ -163,3 +168,81 @@ def test_straddle_mark_atm():
     assert m["value"] == pytest.approx(float(black76(F, K, T, D, vol, "C") + black76(F, K, T, D, vol, "P")), rel=1e-14)
     assert m["delta"] == pytest.approx(D * F / S * (2 * norm.cdf(vol * math.sqrt(T) / 2) - 1), rel=1e-12)
     assert math.isnan(straddle_mark(K, F, 0.2, D, S, {"rho": -0.6, "eta": 1.2, "gamma": 0.5}, thetas)["vol"])
+
+
+def _family_inputs(n=1500):
+    rng = np.random.default_rng(20261028)
+    days = pd.bdate_range("2000-01-03", periods=n)
+    returns = pd.Series(rng.normal(0.0, 0.01, n), index=days)
+    ends = pd.DatetimeIndex(pd.Series(days, index=days).groupby(days.to_period("M")).max().to_numpy())
+    main = pd.Series(rng.normal(0.01, 0.01, len(ends)), index=ends)
+    iv = pd.Series(rng.uniform(0.01, 0.09, len(ends)), index=ends)
+    return main, iv, returns
+
+
+def test_spec_signals_by_hand():
+    main, iv, returns = _family_inputs()
+    s = spec_signals(main, iv, returns)
+    assert list(s.columns) == ["timed_put_main", "iv_minus_rv21", "iv_minus_rv63", "iv_minus_ewma", "garch_above_median"]
+    m = main.index[10]
+    upto = returns[returns.index <= m]
+    assert s.loc[m, "timed_put_main"] == main[m]
+    assert s.loc[m, "iv_minus_rv21"] == pytest.approx(iv[m] - 252 / 21 * (upto.iloc[-21:] ** 2).sum(), abs=1e-14)
+    assert s.loc[m, "iv_minus_rv63"] == pytest.approx(iv[m] - 252 / 63 * (upto.iloc[-63:] ** 2).sum(), abs=1e-14)
+    ewma = upto.iloc[0] ** 2
+    for x in upto.iloc[1:]:
+        ewma = 0.94 * ewma + 0.06 * x**2
+    assert s.loc[m, "iv_minus_ewma"] == pytest.approx(iv[m] - 252 * ewma, abs=1e-12)
+    assert s.loc[m, "garch_above_median"] == pytest.approx(main[m] - main.iloc[:10].median(), abs=1e-15)
+
+
+def test_spec_rv_needs_a_full_window_and_the_median_a_prior_month():
+    main, iv, returns = _family_inputs()
+    s = spec_signals(main, iv, returns)
+    assert np.isnan(s["iv_minus_rv63"].iloc[0])  # 1 month of returns is under 63 sessions
+    assert np.isnan(s["garch_above_median"].iloc[0])  # no month end comes before the first
+
+
+def test_spec_signals_no_lookahead():
+    main, iv, returns = _family_inputs()
+    m = main.index[30]
+    full = spec_signals(main, iv, returns).loc[m]
+    cut = spec_signals(main[main.index <= m], iv[iv.index <= m], returns[returns.index <= m]).loc[m]
+    pd.testing.assert_series_equal(full, cut, rtol=0, atol=0)
+
+
+def test_probabilistic_sharpe_known_value():
+    # hand value: z = 0.1 sqrt(120) / sqrt(1 + 0.05 + 0.01) = 1.0640; Phi(z) = 0.85633
+    assert probabilistic_sharpe(0.1, 121, -0.5, 5.0) == pytest.approx(0.8563, abs=1e-4)
+    assert probabilistic_sharpe(0.1, 121, -0.5, 5.0, 0.1) == pytest.approx(0.5)
+
+
+def test_deflated_sharpe_is_the_probabilistic_sharpe_at_sr0():
+    trials = pd.Series([0.1, 0.2, 0.15, 0.05, 0.3])
+    got = deflated_sharpe(sr=0.3, n_obs=121, skew=-0.5, kurt_pearson=5.0, sr_trials=trials)
+    assert got == probabilistic_sharpe(0.3, 121, -0.5, 5.0, expected_max_sharpe(trials))
+
+
+def test_series_moments_are_of_the_series_given():
+    x = pd.Series(np.random.default_rng(20261028).normal(0.01, 0.04, 200))
+    m = series_moments(x)
+    assert m == {"sr": x.mean() / x.std(), "n_obs": 200, "skew": x.skew(), "kurt_pearson": x.kurt() + 3}
+
+
+def test_family_table():
+    rng = np.random.default_rng(20261028)
+    ids = ["timed_put_main", "iv_minus_rv21", "iv_minus_rv63", "iv_minus_ewma", "garch_above_median"]
+    excess = pd.DataFrame(rng.normal(0.01, 0.04, (120, 5)), columns=ids)
+    diff = pd.DataFrame(rng.normal(0.0, 0.02, (120, 5)), columns=ids)
+    put = pd.Series(rng.normal(0.005, 0.03, 120))
+    t = family_table(excess, diff, put)
+    assert len(t) == 11
+    assert t["series"].value_counts().to_dict() == {"excess": 6, "timed_minus_put": 5}
+    main = t[(t["spec_id"] == "timed_put_main") & (t["series"] == "timed_minus_put")].iloc[0]
+    trials = diff.mean() / diff.std()
+    assert main["n_trials"] == 5
+    assert main["sr_var"] == pytest.approx(trials.var(ddof=1))
+    assert main["deflated_sharpe"] == deflated_sharpe(**series_moments(diff["timed_put_main"]), sr_trials=trials)
+    assert main["psr_zero"] == probabilistic_sharpe(**series_moments(diff["timed_put_main"]))
+    others = t[t["spec_id"] != "timed_put_main"]
+    assert others["deflated_sharpe"].isna().all() and others["psr_zero"].notna().all()
