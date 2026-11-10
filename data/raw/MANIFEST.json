@@ -1,7 +1,7 @@
 {
   "stages": {
     "cboe": {
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
       "versions": {
         "python": "3.12.13",
         "yfinance": "1.7.0",
@@ -14,7 +14,7 @@
       }
     },
     "fred": {
-      "pulled_utc": "2026-10-28T12:44:35.693989+00:00",
+      "pulled_utc": "2026-11-09T18:25:20.154653+00:00",
       "versions": {
         "python": "3.12.13",
         "yfinance": "1.7.0",
@@ -27,7 +27,7 @@
       }
     },
     "prices": {
-      "pulled_utc": "2026-11-03T19:07:50.315343+00:00",
+      "pulled_utc": "2026-11-09T18:24:46.744827+00:00",
       "versions": {
         "python": "3.12.13",
         "yfinance": "1.7.0",
@@ -38,7 +38,7 @@
         "requests": "2.34.2",
         "curl_cffi": "0.17.0"
       },
-      "last_session": "2026-11-02"
+      "last_session": "2026-11-06"
     },
     "ssga": {
       "pulled_utc": "2026-10-28T12:44:41.430717+00:00",
@@ -58,133 +58,133 @@
     "cboe/BXM.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/delayed_quotes/charts/historical/_BXM.json",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 6191,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 6195,
       "first_date": "2002-03-22",
-      "last_date": "2026-11-02",
-      "sha256": "54446182a4e0e02025a92c9aa7573421b4473b63e257d6e9c1dee1e00be59e30"
+      "last_date": "2026-11-06",
+      "sha256": "fd10872d5fb15129213c831296a6f91726e25da400586f5ca86183a990ab28b1"
     },
     "cboe/COR3M.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/delayed_quotes/charts/historical/_COR3M.json",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 5226,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 5230,
       "first_date": "2006-01-03",
-      "last_date": "2026-11-02",
-      "sha256": "b94d0c03275a36f16f1087a59b5598bacd6d854c27fb70e0eb0c6c15e18978b1"
+      "last_date": "2026-11-06",
+      "sha256": "c6fd2fa5a2a0ba1525f7c81e88df45bad84346b8699b24ffefdeae19ecf9a54e"
     },
     "cboe/PUT.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/delayed_quotes/charts/historical/_PUT.json",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 4997,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 5001,
       "first_date": "1991-03-04",
-      "last_date": "2026-11-02",
-      "sha256": "af951d3a31e486559cfcfd316d3c491ff3dd6dcbf9cb2a45cda9c9137dd83454"
+      "last_date": "2026-11-06",
+      "sha256": "8e60526bdb1f1641194fb882b6865860e096eb61dcb59f83766f345bb8bc5005"
     },
     "cboe/VIX.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 9307,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 9311,
       "first_date": "1990-01-02",
-      "last_date": "2026-11-02",
-      "sha256": "2b76ef381fbff39fa7a500d4973d01952ccb47368a27b603b88e6bc78e990b42"
+      "last_date": "2026-11-06",
+      "sha256": "7e647d50a872b4aa64deaef1dfd17b0e1e3b88887cedc4c1fa861d242ecb7383"
     },
     "cboe/VIX3M.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 4307,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 4311,
       "first_date": "2009-09-18",
-      "last_date": "2026-11-02",
-      "sha256": "db5f0e5ac79c77f7add6268a6fd059230f440966b65defc14587ac0430a0ade5"
+      "last_date": "2026-11-06",
+      "sha256": "79463638e26e9838952a0625ddb08e96f260c4bd6e84c2699e3b1337d7c39e2b"
     },
     "cboe/VIX6M.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX6M_History.csv",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 4739,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 4743,
       "first_date": "2008-01-02",
-      "last_date": "2026-11-02",
-      "sha256": "cafd3b273e4e6ab43c767a39015f4a458768bbcfee339ac9b6988c494f4a418a"
+      "last_date": "2026-11-06",
+      "sha256": "99f4d60875cc871b52916afd1ce2f187e0914ab142a1a6b18cb6946ed15c8481"
     },
     "cboe/VIX9D.csv": {
       "stage": "cboe",
       "url": "https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX9D_History.csv",
-      "pulled_utc": "2026-11-03T19:08:18.822290+00:00",
-      "rows": 3981,
+      "pulled_utc": "2026-11-09T18:25:15.450198+00:00",
+      "rows": 3985,
       "first_date": "2011-01-04",
-      "last_date": "2026-11-02",
-      "sha256": "0cb393fd89073fbc459b501f91016d02739d9116c4ddb5c00c83d711942a15e6"
+      "last_date": "2026-11-06",
+      "sha256": "98b2b7523f828e099446eebbc89f8422314ec0456b2085e161b781035ce15e55"
     },
     "fred/DGS1.csv": {
       "stage": "fred",
       "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS1",
-      "pulled_utc": "2026-10-28T12:44:35.693989+00:00",
-      "rows": 16910,
+      "pulled_utc": "2026-11-09T18:25:20.154653+00:00",
+      "rows": 16918,
       "first_date": "1962-01-02",
-      "last_date": "2026-10-26",
-      "sha256": "42d24ef4c26af3e4921091374442e60c27c8cce167718604c6f5ed3432048046"
+      "last_date": "2026-11-05",
+      "sha256": "eb58f75a18521d92f8e1301414b2d3468f3c22147c37494a146b701f120fe32f"
     },
     "fred/DGS1MO.csv": {
       "stage": "fred",
       "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS1MO",
-      "pulled_utc": "2026-10-28T12:44:35.693989+00:00",
-      "rows": 6585,
+      "pulled_utc": "2026-11-09T18:25:20.154653+00:00",
+      "rows": 6593,
       "first_date": "2001-07-31",
-      "last_date": "2026-10-26",
-      "sha256": "bc20f03a3b1bdb3b1638c9187a7ccf477819ec72d583a85293512c0c0bb09c6d"
+      "last_date": "2026-11-05",
+      "sha256": "05f8cc7e6fee5b898891f33ee1297045f3dd7ccaf9b00279c78139730923d9b7"
     },
     "fred/DGS3MO.csv": {
       "stage": "fred",
       "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS3MO",
-      "pulled_utc": "2026-10-28T12:44:35.693989+00:00",
-      "rows": 11780,
+      "pulled_utc": "2026-11-09T18:25:20.154653+00:00",
+      "rows": 11788,
       "first_date": "1981-09-01",
-      "last_date": "2026-10-26",
-      "sha256": "bb51057fbbc393f6ec082162142129e46191376dc153dd1173cee5e6fdaf9fab"
+      "last_date": "2026-11-05",
+      "sha256": "ada4828f1ee3a26ec537c960ae424c3e569e0383eb6b2c46db824046910814e0"
     },
     "fred/DGS6MO.csv": {
       "stage": "fred",
       "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS6MO",
-      "pulled_utc": "2026-10-28T12:44:35.693989+00:00",
-      "rows": 11780,
+      "pulled_utc": "2026-11-09T18:25:20.154653+00:00",
+      "rows": 11788,
       "first_date": "1981-09-01",
-      "last_date": "2026-10-26",
-      "sha256": "274a1c7c904ce86f371ae05c684abdf90ac0a60f6e1e224813fcf087733a2b92"
+      "last_date": "2026-11-05",
+      "sha256": "36c778ed90dfe08aec6dcfda9a948ae523cf094a664bf6f03bed021a8541e161"
     },
     "fred/DTB3.csv": {
       "stage": "fred",
       "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3",
-      "pulled_utc": "2026-10-28T12:44:35.693989+00:00",
-      "rows": 18996,
+      "pulled_utc": "2026-11-09T18:25:20.154653+00:00",
+      "rows": 19004,
       "first_date": "1954-01-04",
-      "last_date": "2026-10-26",
-      "sha256": "ea83d928c3d15fbd7376ba76b87423b1a536e465846ca64e2f4d57f6a3577e0f"
+      "last_date": "2026-11-05",
+      "sha256": "124e0cc2985c721af0c859e3c94e09f6a8003ff1e4fde8accfd8c4f109bc267f"
     },
     "prices/adj_close.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T19:07:50.315343+00:00",
-      "rows": 9297,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-07, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-09T18:24:46.744827+00:00",
+      "rows": 9301,
       "first_date": "1989-12-01",
-      "last_date": "2026-11-02",
-      "sha256": "352677326a16b81b93bd389818ca367046d1d9a91c74ce44d40dd46ab41a7b18"
+      "last_date": "2026-11-06",
+      "sha256": "e922ddac5163dd1a7d2926ad94f1720ec591651068de48d8595d32e36a65666d"
     },
     "prices/close.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T19:07:50.315343+00:00",
-      "rows": 9297,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-07, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-09T18:24:46.744827+00:00",
+      "rows": 9301,
       "first_date": "1989-12-01",
-      "last_date": "2026-11-02",
-      "sha256": "bf832b3f86e929612a15a19df59a50c2e6e4ee7345ef083fffa7224dca7004f8"
+      "last_date": "2026-11-06",
+      "sha256": "9a3015bdd2f16fe0979e9880dd5f3a64c2c12e5a566667c0e357a7a8c0b58f9e"
     },
     "prices/dividends.csv": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T19:07:50.315343+00:00",
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-07, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-09T18:24:46.744827+00:00",
       "rows": 2479,
       "first_date": "1989-12-05",
       "last_date": "2026-10-14",
@@ -192,21 +192,21 @@
     },
     "prices/index.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T19:07:50.315343+00:00",
-      "rows": 9297,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-07, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-09T18:24:46.744827+00:00",
+      "rows": 9301,
       "first_date": "1989-12-01",
-      "last_date": "2026-11-02",
-      "sha256": "186ccbc5879e0025949fd3e1995b65d97ddf544bc44b975782d9282af3ceae43"
+      "last_date": "2026-11-06",
+      "sha256": "12eeb03d29dd4fcdcea56e6013b3d063b90260cbaf5d2b5bd26ccdf762c533da"
     },
     "prices/sectors.parquet": {
       "stage": "prices",
-      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-03, auto_adjust=False, actions=True)",
-      "pulled_utc": "2026-11-03T19:07:50.315343+00:00",
-      "rows": 7008,
+      "url": "yfinance Ticker(t).history(start=1989-12-01, end=2026-11-07, auto_adjust=False, actions=True)",
+      "pulled_utc": "2026-11-09T18:24:46.744827+00:00",
+      "rows": 7012,
       "first_date": "1998-12-22",
-      "last_date": "2026-11-02",
-      "sha256": "d7049d188e926cc7c7fad0f68f29ffc3d65d8491f653cc7c5e77e68f1c72cf71"
+      "last_date": "2026-11-06",
+      "sha256": "c93ee096c10211c053aa01710000279dcf0ec00ae9f1510f3db8d46725ef0427"
     },
     "ssga/xlk_holdings_2026-10-28.csv": {
       "stage": "ssga",

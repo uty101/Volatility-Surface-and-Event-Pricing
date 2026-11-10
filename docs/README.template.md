@@ -36,7 +36,7 @@ The smile on the last day shows the skew the slices hold: the 30-day 25-delta ri
 
 ![^SPX smiles](outputs/figures/spx_smiles_{{last_day}}.png)
 
-ATM vol jumped on 2026-10-30 and stayed up, ending at {{atm_last}}%, with the term slope turning negative.
+ATM vol jumped on 2026-10-30, fell back on 2026-11-04 and jumped again on 2026-11-05, ending at {{atm_last}}% with the term slope negative.
 
 ![^SPX metrics](outputs/figures/spx_metrics.png)
 

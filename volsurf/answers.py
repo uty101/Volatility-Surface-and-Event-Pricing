@@ -127,7 +127,7 @@ def _question_2(a: _Answers, n_days: int, first: str, last: str) -> None:
     spx = f"ticker=^SPX;day={first}", f"ticker=^SPX;day={last}"
     a.add(2, f"^SPX 30-day ATM vol was {{:.2f}}% on {first} (N = {n_days} capture days).", surface, spx[0], "atm_30",
           100)
-    a.add(2, f"It was {{:.2f}}% on {last}, after the 2026-10-30 sell-off.", surface, spx[1], "atm_30", 100)
+    a.add(2, f"It was {{:.2f}}% on {last}, after sell-offs on 2026-10-30 and 2026-11-05.", surface, spx[1], "atm_30", 100)
     before = a.get(surface, spx[0], "rr25_30") * 100
     a.add(2, f"The 30-day 25-delta risk reversal went from {before:.2f} to {{:.2f}} vol points, so skew steepened "
              f"(N = {n_days} days).", surface, spx[1], "rr25_30", 100)
