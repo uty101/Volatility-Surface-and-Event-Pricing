@@ -6,7 +6,14 @@ from pypdf import PdfReader
 
 from tests.test_report import _build
 from volsurf.answers import read_table, select_rows
-from volsurf.readme import MINUS, TABLES, capture_window, render_table
+from volsurf.readme import (
+    FINDINGS,
+    MINUS,
+    TABLES,
+    capture_window,
+    findings_markdown,
+    render_table,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "outputs" / "tables"
@@ -73,16 +80,60 @@ def test_no_dashes_and_no_hyphen_joining_sentences(tmp_path):
         assert not re.search(r"\w - \w", prose)
 
 
-def test_readme_under_15_kb():
-    assert (ROOT / "README.md").stat().st_size < 15 * 1024
+def test_readme_under_16_kb():
+    assert (ROOT / "README.md").stat().st_size < 16 * 1024  # instruction 13 step 13.1
 
 
-def test_status_line_under_the_intro():
-    line = next(x for x in README.split("\n") if x.startswith("Results are in"))
-    assert "(outputs/)" in line
-    assert "actions/workflows/ci.yml/badge.svg" in line
-    assert re.search(r"[\d,]+ tests\.", line)
-    assert README.index(line) < README.index("## Run it")
+SECTIONS = ["## What it found", "## 1. Does the pricer match QuantLib?", "## 2. The S&P 500 surface",
+            "## 3. Earnings events", "## 4. The volatility risk premium", "## 5. Correlation",
+            "## 6. P&L attribution and hedging", "## Risk report", "## Run it", "## What this does not do",
+            "## Repo map", "## Licence"]
+
+
+def test_readme_order():
+    """Instruction 13 step 13.1 item 1: title, badge line, intro, outputs line, capture window, then the sections."""
+    lines = README.split("\n")
+    assert lines[0] == "# Volatility Surface and Event Pricing"
+    assert lines[2].startswith("[![ci](") and "actions/workflows/ci.yml/badge.svg" in lines[2]
+    assert re.fullmatch(r".*\) [\d,]+ tests", lines[2])
+    top = README[:README.index("## ")]
+    outputs = ("Every table, chart and the risk report are committed in [`outputs/`](outputs/), and "
+               "[`outputs/results.html`](outputs/results.html) shows them on 1 page, so nothing needs to be run to see "
+               "the results.")
+    assert top.index("Prices listed options") < top.index(outputs) < top.index("**Capture window:**")
+    assert [x for x in lines if x.startswith("## ")] == SECTIONS
+
+
+def _found() -> list[str]:
+    return README[README.index("## What it found"):README.index("## 1.")].strip().split("\n\n")[1:]
+
+
+def test_what_it_found():
+    paragraphs = _found()
+    assert len(paragraphs) == len(FINDINGS) == 6
+    for n, text in enumerate(paragraphs, start=1):
+        assert text.startswith(f"**Question {n}: ")
+        assert len(text.split()) <= 90
+
+
+def test_what_it_found_from_answers():
+    assert findings_markdown(read_table(OUT / "answers.csv")) == "\n\n".join(_found())
+
+
+def test_section_3_without_per_event_prose():
+    section = README[README.index("## 3."):README.index("## 4.")]
+    assert "With N = " in section and "stay pending" in section and "no pre-event snapshot" in section
+    assert "against a term structure move" not in section
+    assert "event_scatter.png" in section
+
+
+def test_repo_map():
+    section = README[README.index("## Repo map"):README.index("## Licence")]
+    for path in ("volsurf/", "scripts/", "tests/", "data/raw/", "data/manual/", "outputs/tables/", "outputs/figures/",
+                 "outputs/reports/", "docs/", "decisions/", "instructions/", "review/", ".github/workflows/",
+                 "config.toml", "project_outline/"):
+        assert f"`{path}`" in section
+        assert (ROOT / path).exists()
 
 
 def test_capture_window_from_the_data():

@@ -4,7 +4,8 @@ runs in section order, from data/raw/, data/manual/ and the `snapshots` release 
 Section 1 adds the capture_health stage, Section 2 the eep stage and Section 3 the clean_log and iv stages, Section 4
 the surface stage, Section 5 the density and tails stages, Section 6 the events stage, Section 7 the cor3m and
 live_corr stages, Section 8 the vrp and strategies stages, Section 9 the attribution stage, Section 10 the risk and
-report stages, Section 11 the snapshots, pricer_check, iv_tree, answers and readme stages.
+report stages, Section 11 the snapshots, pricer_check, iv_tree, answers and readme stages, and instruction 13 the
+results stage.
 """
 
 from __future__ import annotations
@@ -1132,12 +1133,23 @@ def stage_readme(cfg) -> Path:
     return out
 
 
+def stage_results(cfg) -> Path:
+    """Instruction 13 step 13.1: outputs/results.html, every chart and headline table on 1 self-contained page."""
+    from volsurf.results import build_results
+
+    out = ROOT / "outputs" / "results.html"
+    out.write_text(build_results(TABLES, FIGURES, _test_count()), encoding="utf-8", newline="\n")
+    print(f"results.html: {out.stat().st_size} bytes")
+    return out
+
+
 STAGES = {"snapshots": stage_snapshots, "capture_health": stage_capture_health, "pricer_check": stage_pricer_check,
           "eep": stage_eep, "clean_log": stage_clean_log, "iv_tree": stage_iv_tree, "iv": stage_iv,
           "surface": stage_surface, "density": stage_density,
           "tails": stage_tails, "events": stage_events, "cor3m": stage_cor3m, "live_corr": stage_live_corr,
           "vrp": stage_vrp, "strategies": stage_strategies, "attribution": stage_attribution,
-          "risk": stage_risk, "report": stage_report, "answers": stage_answers, "readme": stage_readme}
+          "risk": stage_risk, "report": stage_report, "answers": stage_answers, "readme": stage_readme,
+          "results": stage_results}
 
 STAGE_OUTPUTS = {  # what each stage writes, {day} for any capture day; tests/test_run_all.py holds PLAN.md to it
     "snapshots": ["data/raw/snapshot_manifest.csv"],
@@ -1167,6 +1179,7 @@ STAGE_OUTPUTS = {  # what each stage writes, {day} for any capture day; tests/te
     "report": ["outputs/reports/risk_{day}.pdf"],
     "answers": ["outputs/tables/answers.csv"],
     "readme": ["README.md"],
+    "results": ["outputs/results.html"],
 }
 
 

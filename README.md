@@ -1,26 +1,30 @@
 # Volatility Surface and Event Pricing
 
+[![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) 4,759 tests
+
 Prices listed options and their Greeks, solves implied volatility, and fits an arbitrage-free SVI and SSVI surface per underlying.
 Reads the risk-neutral distribution off the surface and measures the move options price around earnings and macro events.
 Tests the volatility risk premium on S&P 500 history from 1990 and implied against realised correlation from Cboe COR3M.
 Splits delta-hedged option P&L into Greeks and builds a 1-page daily risk report.
 Option chains are captured daily from 2026-10-28, so every live result is a method demonstration with its N stated.
 
-Results are in [`outputs/`](outputs/). [![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) 4,747 tests.
+Every table, chart and the risk report are committed in [`outputs/`](outputs/), and [`outputs/results.html`](outputs/results.html) shows them on 1 page, so nothing needs to be run to see the results.
 
 **Capture window:** 2026-10-28 to 2026-11-06, 7 days, 2026-11-02 missed. The first day holds `^SPX`, SPY and AAPL only, from an in-session test capture. The others hold all 37 underlyings.
 
-## Run it
+## What it found
 
-```bash
-uv venv --python 3.12
-uv pip install -r requirements-lock.txt
-uv pip install -e . --no-deps
-python scripts/run_all.py                  # every stage, in section order
-pytest -p socket --disable-socket -q
-```
+**Question 1: does the pricer match QuantLib?** Yes: over 252 grid cases each, the largest gap is 3.9e-14 for BSM prices, 4.4e-13 for the Greeks and 6.8e-05 x S for the American CRR tree.
 
-`run_all.py` needs an authenticated `gh` to download the chains from the `snapshots` release. Long history is committed in `data/raw/`. Fitted surfaces are cached in `data/processed/surface/`, so only new days are fitted. Methods are in [`docs/METHODS.md`](docs/METHODS.md).
+**Question 2: how did the S&P 500 surface move, and is it free of arbitrage?** Over 7 capture days, ^SPX 30-day ATM vol went from 13.44% to 18.08% and the 25-delta risk reversal from −4.16 to −7.14 vol points, so skew steepened. All 3006 accepted SVI slices pass the butterfly arbitrage check.
+
+**Question 3: do event moves differ from what the options priced?** With N = 11 completed events, fewer than the 20 the summary needs, the gap cannot be told apart from 0. 9 of the 11 moved less than the options priced.
+
+**Question 4: does selling S&P 500 volatility pay, and does timing it help?** Selling puts paid: Cboe PUT has a Sharpe of 0.56 over 237 months from 2007. Timing it on implied minus GARCH variance gives 0.80, but after the 5 rules tried its gain over PUT has a deflated Sharpe of 0.412, so it cannot be told apart from luck.
+
+**Question 5: does implied correlation predict realised correlation?** Yes, in part. Regressing next quarter's realised sector correlation on COR3M gives a slope of 0.713 and an R² of 0.439 (N = 5167 days).
+
+**Question 6: how does hedged P&L split, and what does hedging frequency change?** The Greeks explain a median 0.931 of each live ^SPX straddle move (N = 21 moves). Hedging every step leaves an error sd of 0.241 under GBM but 0.813 under Heston, because the delta hedge is blind to vol moves.
 
 ## 1. Does the pricer match QuantLib?
 
@@ -54,7 +58,7 @@ The density comes straight from each slice, and the shaded band marks where quot
 
 ## 3. Earnings events
 
-With N = 11 completed events, fewer than the 20 the summary needs, the gap between implied and realised moves cannot be told apart from 0 at this N. AMZN AMC 2026-10-29: realised 1.42% against a term structure move of 8.32% and a straddle move of 8.59%, ratio 0.17. INTC AMC 2026-10-29: realised 33.65% against a term structure move of 8.51% and a straddle move of 10.48%, ratio 3.95. CVX BMO 2026-10-30: realised 1.74% against a term structure move of 2.34% and a straddle move of 2.43%, ratio 0.74. XOM BMO 2026-10-30: realised 2.14% against a term structure move of 2.40% and a straddle move of 2.39%, ratio 0.89. AAPL AMC 2026-11-02: realised 1.92% against a term structure move of 4.03% and a straddle move of 4.56%, ratio 0.48. PLTR AMC 2026-11-02: realised 1.66% against a term structure move of 11.77% and a straddle move of 14.35%, ratio 0.14. AMD AMC 2026-11-03: realised 1.00% against a term structure move of 7.76% and a straddle move of 9.47%, ratio 0.13. SHOP BMO 2026-11-03: realised 9.14% against a term structure move of 12.49% and a straddle move of 14.97%, ratio 0.73. UBER BMO 2026-11-04: realised 4.79% against a term structure move of 6.90% and a straddle move of 7.38%, ratio 0.69. ABNB AMC 2026-11-05: realised 11.04% against a term structure move of 10.00% and a straddle move of 11.03%, ratio 1.10. ^SPX NFP 2026-11-06: realised 0.31% against a term structure move of 1.78% and a straddle move of 2.24%, ratio 0.18. 35 more events have a window that ends after the last close in the data and stay pending. 3 events have no pre-event snapshot, because they fall before the capture could see them.
+With N = 11 completed events, fewer than the 20 the summary needs, the gap between implied and realised moves cannot be told apart from 0 at this N. 35 more events have a window that ends after the last close in the data and stay pending. 3 events have no pre-event snapshot, because they fall before the capture could see them.
 
 | ticker | date | timing | straddle % | term structure % | realised % | ratio |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -145,6 +149,18 @@ On the live delta-hedged ^SPX straddles the median explained share is 0.931 (N =
 
 The worst cell of the grid loses 418.6 thousand dollars, at spot −10% and vol +5 points. 1 of 9 limits is breached: ^SPX dollar gamma of −918,440 against a limit of 250,000, which the short wings produce and the report is meant to show.
 
+## Run it
+
+```bash
+uv venv --python 3.12
+uv pip install -r requirements-lock.txt
+uv pip install -e . --no-deps
+python scripts/run_all.py                  # every stage, in section order
+pytest -p socket --disable-socket -q
+```
+
+`run_all.py` needs an authenticated `gh` to download the chains from the `snapshots` release. Long history is committed in `data/raw/`. Fitted surfaces are cached in `data/processed/surface/`, so only new days are fitted. Methods are in [`docs/METHODS.md`](docs/METHODS.md).
+
 ## What this does not do
 
 - The live window is a few weeks, so nothing built on captured chains is a statistical result.
@@ -153,4 +169,25 @@ The worst cell of the grid loses 418.6 thousand dollars, at spot −10% and vol 
 - The timed PUT result is 1 specification of a family of 5, and its gain over PUT does not survive the deflation.
 - The risk book is a sample, not a real portfolio.
 
-`instructions/`, `review/`, `decisions/` and `PLAN.md` are the record of how this was built. The source outline is in [`project_outline/`](project_outline/). MIT licence, see [`LICENSE`](LICENSE).
+## Repo map
+
+| Path | What is in it |
+|---|---|
+| `volsurf/` | The package |
+| `scripts/` | Daily capture, data pulls and `run_all.py` |
+| `tests/` | Offline tests and fixtures |
+| `data/raw/` | Prices, yields, Cboe series and XLK holdings |
+| `data/manual/` | Earnings timing overrides and the macro calendar |
+| `outputs/tables/` | Every table, `answers.csv` among them |
+| `outputs/figures/` | Every chart |
+| `outputs/reports/` | The last day's risk report |
+| `docs/` | Methods, conventions, README template |
+| `decisions/` | Design and review decisions |
+| `instructions/`, `review/` | Session instructions, status and reviews |
+| `.github/workflows/` | CI and the daily capture |
+| `config.toml` | Every parameter |
+| `project_outline/` | The original brief |
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).

@@ -29,7 +29,7 @@ def test_every_stage_declares_its_outputs():
 def test_stages_run_in_section_order():
     stages = list(run_all.STAGES)
     assert stages[0] == "snapshots"  # the days are every capture day in the release when it runs
-    assert stages[-2:] == ["answers", "readme"]
+    assert stages[-3:] == ["answers", "readme", "results"]  # instruction 13: results after readme
     order = ["capture_health", "eep", "iv", "surface", "density", "tails", "events", "cor3m", "live_corr", "vrp",
              "strategies", "attribution", "risk", "report"]
     assert [s for s in stages if s in order] == order

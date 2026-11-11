@@ -1,26 +1,20 @@
 # Volatility Surface and Event Pricing
 
+[![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) {{n_tests}} tests
+
 Prices listed options and their Greeks, solves implied volatility, and fits an arbitrage-free SVI and SSVI surface per underlying.
 Reads the risk-neutral distribution off the surface and measures the move options price around earnings and macro events.
 Tests the volatility risk premium on S&P 500 history from 1990 and implied against realised correlation from Cboe COR3M.
 Splits delta-hedged option P&L into Greeks and builds a 1-page daily risk report.
 Option chains are captured daily from 2026-10-28, so every live result is a method demonstration with its N stated.
 
-Results are in [`outputs/`](outputs/). [![ci](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml/badge.svg)](https://github.com/uty101/Volatility-Surface-and-Event-Pricing/actions/workflows/ci.yml) {{n_tests}} tests.
+Every table, chart and the risk report are committed in [`outputs/`](outputs/), and [`outputs/results.html`](outputs/results.html) shows them on 1 page, so nothing needs to be run to see the results.
 
 **Capture window:** {{first_day}} to {{last_day}}, {{n_days}} days, {{missed}} missed. The first day holds `^SPX`, SPY and AAPL only, from an in-session test capture. The others hold all 37 underlyings.
 
-## Run it
+## What it found
 
-```bash
-uv venv --python 3.12
-uv pip install -r requirements-lock.txt
-uv pip install -e . --no-deps
-python scripts/run_all.py                  # every stage, in section order
-pytest -p socket --disable-socket -q
-```
-
-`run_all.py` needs an authenticated `gh` to download the chains from the `snapshots` release. Long history is committed in `data/raw/`. Fitted surfaces are cached in `data/processed/surface/`, so only new days are fitted. Methods are in [`docs/METHODS.md`](docs/METHODS.md).
+{{findings}}
 
 ## 1. Does the pricer match QuantLib?
 
@@ -46,7 +40,7 @@ The density comes straight from each slice, and the shaded band marks where quot
 
 ## 3. Earnings events
 
-{{answers:3}}
+{{answers:3:summary}}
 
 {{table:events}}
 
@@ -98,6 +92,18 @@ Implied and realised move together, with a slope of {{cor3m_slope}} and an R² o
 
 The worst cell of the grid loses {{grid_worst}} thousand dollars, at spot {{grid_spot}}% and vol +{{grid_vol}} points. {{n_breaches}} of 9 limits is breached: {{breach_underlying}} dollar gamma of {{breach_value}} against a limit of {{breach_limit}}, which the short wings produce and the report is meant to show.
 
+## Run it
+
+```bash
+uv venv --python 3.12
+uv pip install -r requirements-lock.txt
+uv pip install -e . --no-deps
+python scripts/run_all.py                  # every stage, in section order
+pytest -p socket --disable-socket -q
+```
+
+`run_all.py` needs an authenticated `gh` to download the chains from the `snapshots` release. Long history is committed in `data/raw/`. Fitted surfaces are cached in `data/processed/surface/`, so only new days are fitted. Methods are in [`docs/METHODS.md`](docs/METHODS.md).
+
 ## What this does not do
 
 - The live window is a few weeks, so nothing built on captured chains is a statistical result.
@@ -106,4 +112,25 @@ The worst cell of the grid loses {{grid_worst}} thousand dollars, at spot {{grid
 - The timed PUT result is 1 specification of a family of 5, and its gain over PUT does not survive the deflation.
 - The risk book is a sample, not a real portfolio.
 
-`instructions/`, `review/`, `decisions/` and `PLAN.md` are the record of how this was built. The source outline is in [`project_outline/`](project_outline/). MIT licence, see [`LICENSE`](LICENSE).
+## Repo map
+
+| Path | What is in it |
+|---|---|
+| `volsurf/` | The package |
+| `scripts/` | Daily capture, data pulls and `run_all.py` |
+| `tests/` | Offline tests and fixtures |
+| `data/raw/` | Prices, yields, Cboe series and XLK holdings |
+| `data/manual/` | Earnings timing overrides and the macro calendar |
+| `outputs/tables/` | Every table, `answers.csv` among them |
+| `outputs/figures/` | Every chart |
+| `outputs/reports/` | The last day's risk report |
+| `docs/` | Methods, conventions, README template |
+| `decisions/` | Design and review decisions |
+| `instructions/`, `review/` | Session instructions, status and reviews |
+| `.github/workflows/` | CI and the daily capture |
+| `config.toml` | Every parameter |
+| `project_outline/` | The original brief |
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
